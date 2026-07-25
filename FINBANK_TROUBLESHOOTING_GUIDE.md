@@ -1,58 +1,68 @@
 # FinBank DevOps — Troubleshooting Guide & Interview War Stories
 
-> **This file documents every real challenge encountered during the FinBank banking project.**
+> **This file documents every real challenge encountered during the FinBank banking project on AWS.**
 > Use it to prepare for interview questions like:
-> - "What's the hardest problem you've debugged?"
+> - "What is the hardest problem you have debugged?"
+> - "Tell me about a time something broke in production."
 > - "What went wrong in your project and how did you fix it?"
-> - "What would you do differently next time?"
-
-All 24 challenges are documented with: What Happened → Root Cause → Exact Fix → Interview Answer
+>
+> Every challenge follows the same structure:
+> **What Happened → Exact Error → Root Cause → How to Diagnose → Exact Fix → Prevention → Interview Answer (STAR format)**
+>
+> STAR = **S**ituation → **T**ask → **A**ction → **R**esult
 
 ---
 
 ## Table of Contents
 
-**Category A — Docker & Containerisation Issues**
+**Category A — Docker & Container Issues**
 - [#1 — exec format error: all pods crash on EKS](#1-exec-format-error)
-- [#2 — Cannot delete ECR images after multi-arch push](#2-ecr-multi-arch-deletion)
-- [#17 — Jenkins cannot pull images from Docker Hub](#17-jenkins-docker-dns)
-- [#20 — Maven stuck on Rosetta 2 emulation inside Jenkins](#20-rosetta-maven-error)
+- [#2 — ECR multi-arch image deletion fails](#2-ecr-multi-arch-deletion)
+- [#3 — Jenkins cannot resolve DNS to download tools](#3-jenkins-dns-failure)
+- [#4 — Maven crashes inside Jenkins: Rosetta 2 AVX2 error on Mac M1](#4-rosetta-maven-error)
+- [#5 — Trivy install fails: permission denied on /usr/local/bin](#5-trivy-permission-denied)
 
-**Category B — Jenkins CI/CD Issues**
-- [#3 — Jenkins credential ID mismatch breaks every pipeline](#3-jenkins-credential-mismatch)
-- [#21 — Staging image tag never gets updated](#21-staging-image-tag)
-- [#22 — IP address exhaustion: pods stuck Pending in staging](#22-ip-exhaustion)
+**Category B — Jenkins CI/CD**
+- [#6 — Jenkins credential ID mismatch: authentication fails every pipeline run](#6-jenkins-credential-mismatch)
+- [#7 — Staging image tag never updates after pipeline succeeds](#7-staging-image-tag)
+- [#8 — zsh bracket expansion silently breaks terraform -var flag](#8-zsh-terraform-var)
+- [#9 — New CVEs block build #43: Trivy finds critical vulnerabilities](#9-new-cves-block-build)
 
-**Category C — Kubernetes Pod Issues**
-- [#5 — All pods in CrashLoopBackOff after first deploy](#5-localhost-in-values)
-- [#6 — Spring Boot starts but immediately exits (empty database)](#6-empty-rds-schema)
-- [#7 — Backend works in dev but broken in staging (wrong Spring profile)](#7-wrong-spring-profile)
-- [#8 — Redis not connecting: Spring Boot 3.x changed env var names](#8-redis-env-var-names)
-- [#19 — Login always fails: BCrypt hash prefix mismatch](#19-bcrypt-prefix)
-- [#24 — Wrong Spring profile in staging (docker vs staging)](#24-wrong-staging-profile)
+**Category C — Kubernetes & EKS**
+- [#10 — All pods CrashLoopBackOff: localhost in values.yaml](#10-localhost-in-values)
+- [#11 — Spring Boot crashes on startup: database tables do not exist](#11-empty-rds-schema)
+- [#12 — Backend connects to localhost in staging: wrong Spring profile active](#12-wrong-spring-profile)
+- [#13 — Redis connection fails: Spring Boot 3.x renamed all env var names](#13-redis-env-var-names)
+- [#14 — Login always fails: BCrypt hash prefix mismatch](#14-bcrypt-prefix)
+- [#15 — Staging pods load dev config: docker profile instead of staging](#15-docker-vs-staging-profile)
+- [#16 — Pods stuck in Pending: VPC IP address exhaustion on EKS](#16-ip-exhaustion)
+- [#17 — eksctl IRSA silently fails: pods cannot assume IAM role](#17-eksctl-irsa-silent-failure)
+- [#18 — PDB never matches any pods: label selector mismatch](#18-pdb-label-mismatch)
+- [#19 — HPA and PDB reference wrong deployment name in Helm template](#19-hpa-pdb-name-mismatch)
 
-**Category D — Terraform Infrastructure Issues**
-- [#9 — Terraform destroy fails with dependency error on ELB](#9-terraform-destroy-elb)
-- [#10 — Orphaned ELB security group blocks VPC deletion](#10-orphaned-elb-sg)
-- [#11 — Terraform apply hangs: state file locked](#11-terraform-state-lock)
-- [#12 — "Variable specified twice" error in Terraform](#12-terraform-variable-conflict)
-- [#20 — Zsh bracket expansion breaks terraform -var](#20-zsh-terraform)
-- [#23 — Staging database missing after every rebuild](#23-staging-db-missing)
+**Category D — Terraform Infrastructure**
+- [#20 — Terraform destroy fails: ELB still holds security group references](#20-terraform-destroy-elb)
+- [#21 — Orphaned ELB security group blocks VPC deletion](#21-orphaned-elb-sg)
+- [#22 — Terraform state file locked: no commands can run](#22-terraform-state-lock)
+- [#23 — "Variable specified twice" error breaks terraform plan](#23-variable-specified-twice)
+- [#24 — Staging database missing after every Terraform rebuild](#24-staging-db-missing)
+- [#25 — Double port in JDBC URL: Terraform db_endpoint includes :3306](#25-double-port-jdbc)
 
-**Category E — AWS Networking Issues**
-- [#13 — ALB created but health checks failing: missing IAM permission](#13-alb-missing-iam)
-- [#14 — Backend ingress routing to wrong path](#14-wrong-ingress-path)
-- [#14b — Subnet IDs change after every rebuild](#14b-subnet-ids-change)
-- [#22b — IMDS hop limit: ALB Controller cannot detect cluster VPC](#22b-imds-hop-limit)
+**Category E — AWS Networking**
+- [#26 — ALB created but health checks fail: missing IAM policy](#26-alb-missing-iam)
+- [#27 — Backend ingress routes to wrong path: rewrite annotation missing](#27-ingress-wrong-path)
+- [#28 — Subnet IDs change after every EKS rebuild](#28-subnet-ids-change)
+- [#29 — IMDS hop limit: ALB Ingress Controller cannot detect cluster VPC](#29-imds-hop-limit)
 
-**Category F — GitOps & ArgoCD Issues**
-- [#4 — ArgoCD repo add silently drops credentials in zsh](#4-argocd-repo-zsh)
-- [#15 — All services broken after EKS rebuild: OIDC ID changed](#15-oidc-id-changes)
-- [#18 — ArgoCD ApplicationSet goes into CrashLoop](#18-argocd-applicationset)
+**Category F — GitOps, ArgoCD & Application**
+- [#30 — ArgoCD repo credentials silently dropped in zsh](#30-argocd-zsh-credentials)
+- [#31 — All services break after EKS rebuild: OIDC provider ID changed](#31-oidc-id-changed)
+- [#32 — ArgoCD ApplicationSet crashes on install](#32-argocd-applicationset-crash)
+- [#33 — Registration API returns Validation Failed: missing required fields](#33-validation-failed-registration)
 
 ---
 
-## Category A — Docker & Containerisation
+## Category A — Docker & Container Issues
 
 ---
 
@@ -62,169 +72,313 @@ All 24 challenges are documented with: What Happened → Root Cause → Exact Fi
 
 #### What Happened
 
-After the first successful Jenkins pipeline run (images built and pushed to ECR), all pods immediately went into CrashLoopBackOff. I checked the pod logs with `kubectl logs <pod> --previous` and saw:
+After the first successful Jenkins pipeline run — images built, pushed to ECR, ArgoCD synced — every single pod went into CrashLoopBackOff. No network issue, no config error. The pod log showed just one line:
 
 ```
 standard_init_linux.go:228: exec user process caused: exec format error
 ```
 
-The pod kept restarting in an endless loop. Nothing else — just that single error.
+The pods kept restarting. Nothing else in the logs.
 
 #### Root Cause
 
-My laptop is a Mac with Apple Silicon (M1/M2 chip), which uses **ARM64** architecture (64-bit ARM instruction set, same family as phones). AWS EKS worker nodes run on EC2 t3.medium instances, which use **AMD64** (Intel x86_64) architecture.
+My laptop is a Mac with Apple Silicon (M1 chip). It uses **ARM64** architecture — the same family of chip used in phones and tablets.
 
-Think of it like two different languages. If you write a book in English and someone only reads French, they cannot understand it. Similarly, an ARM64 binary cannot be executed by an AMD64 CPU.
+AWS EKS worker nodes run on EC2 t3.medium instances. Those use **AMD64** (Intel x86_64) architecture — the traditional "PC" chip.
 
-When Jenkins built the Docker image on my Mac (ARM64), it produced an ARM64 binary. ECR stored that ARM64 image. EKS nodes tried to run it on AMD64 hardware → immediate crash with "exec format error".
+These two chip types speak different instruction languages. A program compiled for ARM64 cannot run on AMD64, and vice versa.
 
-#### Exact Fix
+When Jenkins ran the Docker build on my Mac, it produced an ARM64 image. That image was pushed to ECR. When EKS (AMD64) tried to run it: `exec format error` — the CPU literally could not understand the binary.
 
-Install Docker Buildx on Jenkins and build for **both architectures simultaneously**:
+Think of it like a French-only speaker being handed a book written entirely in Japanese. Same "book", unreadable.
 
-```bash
-# In Jenkins Stage 8 (Docker Build + Push)
-
-# Step 1: Create a special builder that can cross-compile
-docker buildx create \
-  --name finbank-multiarch-builder \
-  --driver docker-container \
-  --use
-
-# Step 2: Bootstrap it (downloads the QEMU emulation layers)
-docker buildx inspect finbank-multiarch-builder --bootstrap
-
-# Step 3: Build for BOTH architectures and push to ECR in one command
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  --tag <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/finbank-backend:1.0.0-${BUILD_NUMBER} \
-  --push \
-  .
-
-# Step 4: Cleanup
-docker buildx rm finbank-multiarch-builder || true
-```
-
-The result is a **manifest list** in ECR — a single image tag that contains two images inside it. When EKS pulls it on AMD64 nodes, AWS serves the AMD64 version. When your Mac pulls it, it gets ARM64.
-
-Also add architecture detection in Stage 2 (Install Tools) because AWS CLI and Trivy also need architecture-specific downloads:
+#### How to Diagnose
 
 ```bash
-# Detect architecture
-ARCH=$(uname -m)
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-  ARCH_SUFFIX="arm64"
-else
-  ARCH_SUFFIX="amd64"
-fi
+# Check what architecture your Docker image was built for
+docker inspect <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/finbank-backend:1.0.0-44 \
+  | grep -i architecture
 
-# Download Trivy for the correct architecture
-curl -L "https://github.com/aquasecurity/trivy/releases/download/v0.50.0/trivy_0.50.0_Linux-${ARCH_SUFFIX}.tar.gz" -o trivy.tar.gz
+# Check what architecture your EKS nodes use
+kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.nodeInfo.architecture}{"\n"}{end}'
+
+# Check the pod error
+kubectl describe pod finbank-backend-xxxxxx -n finbank-dev
+kubectl logs finbank-backend-xxxxxx -n finbank-dev --previous
 ```
 
-#### Interview Answer
+#### Exact Fix (Step by Step)
 
-> "Our first deployment failed with 'exec format error' across all pods. I checked pod logs and saw the error came from Linux's execution layer — it meant the CPU couldn't understand the binary. The root cause was that I built Docker images on my Mac M1 (ARM64) and EKS runs AMD64 nodes. The CPU architectures are incompatible. I fixed it using Docker Buildx — a cross-compilation tool that builds for multiple architectures simultaneously. Now the pipeline runs `docker buildx build --platform linux/amd64,linux/arm64 --push` and ECR stores a manifest list containing both versions. EKS automatically pulls the AMD64 variant. This is now standard practice in any team that has Apple Silicon developers deploying to x86 cloud infrastructure."
+Use **Docker Buildx** — a cross-compilation tool built into Docker. It builds for multiple architectures at once and pushes a single image tag that works on all of them.
+
+**Step 1: Update Stage 2 of Jenkinsfile — install Buildx and detect architecture**
+
+```groovy
+stage('Install Tools') {
+    steps {
+        sh '''
+            # Detect what CPU this Jenkins agent runs on
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+                ARCH_SUFFIX="arm64"
+            else
+                ARCH_SUFFIX="amd64"
+            fi
+
+            # Install Trivy for the correct architecture
+            curl -L "https://github.com/aquasecurity/trivy/releases/download/v0.50.0/trivy_0.50.0_Linux-${ARCH_SUFFIX}.tar.gz" -o trivy.tar.gz
+            tar -xzf trivy.tar.gz trivy
+            chmod +x trivy
+
+            # Install AWS CLI for the correct architecture
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH_SUFFIX}.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            ./aws/install --update
+        '''
+    }
+}
+```
+
+**Step 2: Update the Docker Build stage to use Buildx**
+
+```groovy
+stage('Docker Build & Push') {
+    steps {
+        sh '''
+            # Create a Buildx builder that can cross-compile
+            docker buildx create \
+              --name finbank-multiarch-builder \
+              --driver docker-container \
+              --use
+
+            # Start it up (downloads QEMU emulation layers)
+            docker buildx inspect finbank-multiarch-builder --bootstrap
+
+            # Build for BOTH architectures and push to ECR in one command
+            # --platform means: build a version for AMD64 AND a version for ARM64
+            # --push means: push directly to ECR (not to local Docker)
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --tag <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/finbank-backend:1.0.0-${BUILD_NUMBER} \
+              --push \
+              .
+
+            # Clean up the builder
+            docker buildx rm finbank-multiarch-builder || true
+        '''
+    }
+}
+```
+
+ECR now stores a **manifest list** — a single tag (`1.0.0-44`) that contains two images inside. When EKS pulls it on AMD64 nodes, it gets the AMD64 version. When your Mac pulls it locally, it gets ARM64. All automatic.
+
+#### Prevention
+
+- Always use `docker buildx build --platform linux/amd64,linux/arm64` in Jenkins pipelines when developers use Mac M1/M2.
+- Add a pipeline check: if `docker inspect` shows architecture is `arm64`, fail the build with a clear error before pushing.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** During the FinBank project, after my first successful Jenkins pipeline run that built and pushed Docker images to ECR, every pod went into CrashLoopBackOff on EKS immediately after ArgoCD synced.
+
+**Task:** I needed to diagnose why all pods were crashing and fix the deployments across all three microservices (backend, frontend, analytics).
+
+**Action:** I checked pod logs with `kubectl logs --previous` and saw `exec format error`. I recognised this error means the CPU cannot understand the binary's instruction set. I checked the node architecture with `kubectl get nodes` — AMD64. I checked the image I built on my Mac M1 — ARM64. The mismatch was clear. I updated the Jenkins pipeline to use Docker Buildx with `--platform linux/amd64,linux/arm64`, which builds both architecture versions and pushes a manifest list to ECR. EKS automatically picks the AMD64 version.
+
+**Result:** All pods started successfully. The fix took about 30 minutes to implement. This is now standard practice in the pipeline — any developer on Mac M1 or M2 can push images that run correctly on AMD64 EC2 nodes.
 
 ---
 
 ### #2 — ECR Multi-Arch Deletion
 
-**Severity:** Medium | **Category:** ECR Management
+**Severity:** Medium | **Category:** ECR Image Management
 
 #### What Happened
 
-When trying to clean up old ECR images to save storage costs, the normal deletion commands failed with errors. Some images deleted but left orphaned manifests. Trying to delete the repository itself failed with "repository is not empty" even after deleting all visible images.
+When cleaning up old ECR images to save storage costs, the standard deletion command failed. Some images deleted but left orphaned entries. Trying to delete the ECR repository itself failed with "repository is not empty" — even after deleting all visible tags.
+
+```
+An error occurred (ImageNotFoundException) when calling the BatchDeleteImage operation
+An error occurred (RepositoryNotEmptyException) when calling the DeleteRepository operation:
+  The repository with name 'finbank-backend' in registry with id '<YOUR_AWS_ACCOUNT_ID>' cannot be deleted
+  because it still contains images
+```
 
 #### Root Cause
 
-Multi-architecture images in ECR have a 3-layer structure, not 1 layer like standard images:
+Multi-arch images in ECR have a **3-layer structure**, not 1 layer like regular images:
 
 ```
-Layer 1 — Manifest List (the tag, e.g., 1.0.0-44)
-   ├── Layer 2a — Architecture Manifest for linux/amd64
-   │       └── Layer 3a — Actual AMD64 image layers
-   └── Layer 2b — Architecture Manifest for linux/arm64
-           └── Layer 3b — Actual ARM64 image layers
+Layer 1: Manifest List   → the tag you see (e.g., 1.0.0-44)
+   ├── Layer 2a: AMD64 manifest   → invisible in the console, no tag
+   │     └── Layer 3a: AMD64 image layers (the actual data)
+   └── Layer 2b: ARM64 manifest   → invisible in the console, no tag
+         └── Layer 3b: ARM64 image layers (the actual data)
 ```
 
-If you delete Layer 1 (the tag) first, Layers 2a and 2b still exist as untagged digests. If you delete Layer 2s first, Layer 1 exists as a tag pointing to nothing. AWS ECR doesn't automatically clean up these orphaned manifests.
+When you delete Layer 1 (the visible tag), AWS removes just that entry. Layers 2a and 2b survive as **untagged digests** — invisible in the console but still counted as images by the repository. ECR refuses to delete a repository that has any images, tagged or untagged.
 
-#### Exact Fix
+#### How to Diagnose
 
-Delete in the correct order: tagged manifest first, then architecture manifests, then the repository:
+```bash
+# List ALL images including untagged ones
+aws ecr list-images \
+  --repository-name finbank-backend \
+  --region ap-south-1 \
+  --output table
+
+# Check untagged images specifically
+aws ecr list-images \
+  --repository-name finbank-backend \
+  --filter tagStatus=UNTAGGED \
+  --region ap-south-1
+```
+
+#### Exact Fix (Step by Step)
+
+**Option A — Force delete the entire repository (fastest for cleanup):**
+
+```bash
+aws ecr delete-repository \
+  --repository-name finbank-backend \
+  --region ap-south-1 \
+  --force    # --force deletes all images inside, tagged and untagged
+```
+
+**Option B — Delete images in the correct order (when you want to keep the repository):**
 
 ```bash
 REPO="finbank-backend"
 REGION="ap-south-1"
-ACCOUNT="<YOUR_AWS_ACCOUNT_ID>"
 
-# Step 1: Get the manifest digest for the tag (the top-level manifest list)
-MANIFEST_DIGEST=$(aws ecr batch-get-image \
-  --repository-name $REPO \
-  --image-ids imageTag=1.0.0-44 \
-  --query 'images[0].imageManifest' \
-  --output text --region $REGION | python3 -c "import sys,json; print(json.load(sys.stdin)['manifests'][0]['digest'])" 2>/dev/null || echo "")
-
-# Step 2: Delete the tagged image (manifest list)
+# Step 1: Delete tagged images (the manifest lists)
 aws ecr batch-delete-image \
   --repository-name $REPO \
   --image-ids imageTag=1.0.0-44 \
   --region $REGION
 
-# Step 3: Delete all untagged images (leftover architecture manifests)
-UNTAGGED_DIGESTS=$(aws ecr list-images \
+# Step 2: Delete all untagged images (orphaned architecture manifests)
+UNTAGGED=$(aws ecr list-images \
   --repository-name $REPO \
   --filter tagStatus=UNTAGGED \
-  --query 'imageIds[*]' \
-  --region $REGION)
+  --query 'imageIds' \
+  --region $REGION \
+  --output json)
 
-if [ "$UNTAGGED_DIGESTS" != "[]" ]; then
+if [ "$UNTAGGED" != "[]" ]; then
   aws ecr batch-delete-image \
     --repository-name $REPO \
-    --image-ids "$UNTAGGED_DIGESTS" \
+    --image-ids "$UNTAGGED" \
     --region $REGION
 fi
-
-# Step 4: Now delete the repository
-aws ecr delete-repository \
-  --repository-name $REPO \
-  --region $REGION --force  # --force handles any remaining images
 ```
 
-Simplest approach for full cleanup: just use `--force` flag on repository deletion:
+**Option C — Enable ECR Lifecycle Policy to auto-clean old images:**
+
+```json
+{
+  "rules": [
+    {
+      "rulePriority": 1,
+      "description": "Keep only last 5 tagged images",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["1.0.0"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 5
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 2,
+      "description": "Delete untagged images after 1 day",
+      "selection": {
+        "tagStatus": "untagged",
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 1
+      },
+      "action": { "type": "expire" }
+    }
+  ]
+}
+```
+
+Apply with:
 ```bash
-aws ecr delete-repository --repository-name finbank-backend --region ap-south-1 --force
+aws ecr put-lifecycle-policy \
+  --repository-name finbank-backend \
+  --lifecycle-policy-text file://lifecycle-policy.json \
+  --region ap-south-1
 ```
 
-#### Interview Answer
+#### Prevention
 
-> "Cleaning up multi-arch ECR images was more complex than I expected. Normal images are a single artifact. Multi-arch images are actually a 3-layer structure — a manifest list tag wrapping two architecture-specific manifests, each wrapping the actual image layers. Deleting just the tag leaves orphaned architecture manifests. I learned to delete in order: tagged manifest list first, then untagged digests, then the repository. For quick teardowns, `aws ecr delete-repository --force` handles all of this automatically."
+- Apply ECR Lifecycle Policies to all repositories during Terraform provisioning. This cleans up untagged manifests automatically after 1 day.
+- Never try to delete a multi-arch ECR repository without `--force` flag.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** While doing a cost cleanup on the FinBank project's ECR repositories, I tried to delete old images and got "repository is not empty" errors even after deleting all visible tagged images.
+
+**Task:** I needed to fully clean up the ECR repository so I could delete and recreate it as part of a Terraform teardown.
+
+**Action:** I listed all images including untagged ones and discovered dozens of orphaned architecture manifests — the AMD64 and ARM64 sub-manifests left behind when I deleted the parent manifest list tags. I learned that multi-arch images have a 3-layer structure and you must delete in the correct order: parent manifest list first, then the untagged architecture manifests. For the cleanup I used `--force` flag. Going forward I added ECR Lifecycle Policies in Terraform to auto-expire untagged images after 1 day.
+
+**Result:** Repositories cleaned up successfully. The Lifecycle Policy is now part of the Terraform ECR module so it applies to all three service repositories automatically.
 
 ---
 
-### #17 — Jenkins Docker DNS
+### #3 — Jenkins DNS Failure
 
 **Severity:** High | **Category:** Jenkins Networking
 
 #### What Happened
 
-Stage 2 of the Jenkins pipeline (Install Tools) failed with DNS resolution errors when trying to download AWS CLI and Trivy:
+Stage 2 of the Jenkins pipeline (Install Tools) failed immediately with DNS errors while trying to download AWS CLI and Trivy:
 
 ```
 curl: (6) Could not resolve host: awscli.amazonaws.com
 curl: (6) Could not resolve host: github.com
+Retrying... (1/3)
+curl: (6) Could not resolve host: awscli.amazonaws.com
+ERROR: Build failed in stage: Install Tools
 ```
 
-But when I ran the same curl command from my Mac terminal, it worked fine. The issue was specific to Jenkins.
+The same curl commands worked perfectly from my Mac terminal. The issue was specific to Jenkins.
 
 #### Root Cause
 
-Jenkins runs inside a Docker container on my Mac. By default, Docker containers use the internal Docker DNS resolver (127.0.0.11), not the host machine's DNS. When my Mac's VPN is active or there are Docker DNS configuration issues, the container cannot resolve public hostnames.
+Jenkins runs inside a Docker container. Docker containers use Docker's internal DNS resolver (at IP `127.0.0.11`) by default — not your Mac's system DNS.
 
-#### Exact Fix
+When the Mac's VPN is active, or when Docker's network configuration is inconsistent, the container's internal DNS resolver cannot reach public DNS servers. The container cannot resolve `github.com` or `awscli.amazonaws.com` even though your Mac can.
 
-Start the Jenkins container with explicit Google DNS servers:
+Think of it like being in a hotel room with no internet, while your phone (on mobile data) works fine. Two different network paths.
+
+#### How to Diagnose
+
+```bash
+# Test DNS inside the Jenkins container
+docker exec jenkins nslookup github.com
+docker exec jenkins curl -v https://github.com 2>&1 | head -20
+
+# Check what DNS servers the container is using
+docker exec jenkins cat /etc/resolv.conf
+
+# Check Docker's DNS configuration
+docker inspect jenkins | grep -A5 '"Dns"'
+```
+
+#### Exact Fix (Step by Step)
+
+**Step 1: Stop and remove the existing Jenkins container**
+
+```bash
+docker stop jenkins
+docker rm jenkins
+```
+
+**Step 2: Recreate Jenkins with explicit Google DNS servers**
 
 ```bash
 docker run -d \
@@ -235,62 +389,219 @@ docker run -d \
   -v jenkins_home:/var/jenkins_home \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v $(which docker):/usr/bin/docker \
-  jenkins/jenkins:lts
+  jenkins/jenkins:lts-jdk21
 ```
 
-If Jenkins is already running, stop it, remove it, and recreate with the `--dns` flags.
+The `--dns 8.8.8.8` and `--dns 8.8.4.4` flags tell the container to always use Google's public DNS instead of Docker's internal resolver.
 
-#### Interview Answer
+**Step 3: Verify DNS works inside container**
 
-> "Jenkins would fail trying to download tools in Stage 2 with DNS resolution errors, but the same curl commands worked fine from my Mac. The issue was Jenkins running in a Docker container with Docker's internal DNS resolver. During VPN or network configuration changes, that resolver couldn't reach public hostnames. The fix was to start the Jenkins container with explicit `--dns 8.8.8.8` flags, which points the container directly to Google's DNS servers."
+```bash
+docker exec jenkins nslookup github.com
+# Should return: Address: 140.82.x.x (GitHub's IP)
+```
+
+#### Prevention
+
+Always include `--dns 8.8.8.8 --dns 8.8.4.4` in the `docker run` command for Jenkins. Document this in your runbook so rebuilds always use these flags.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** During the FinBank project setup, Jenkins would fail on Stage 2 — Install Tools — with DNS resolution errors for AWS and GitHub domains, but the same curl commands worked from my Mac terminal.
+
+**Task:** I needed Jenkins to be able to download Trivy and AWS CLI during every pipeline run.
+
+**Action:** I checked DNS resolution inside the Jenkins container with `docker exec jenkins nslookup github.com` and got no response, while `nslookup github.com` on my Mac worked. I traced the issue to Docker's internal DNS resolver being unable to reach public servers. The fix was recreating the Jenkins container with `--dns 8.8.8.8 --dns 8.8.4.4` to bypass Docker's DNS and use Google's public resolvers directly.
+
+**Result:** DNS resolution inside Jenkins worked immediately. All tool downloads in Stage 2 succeeded. I added these DNS flags to the team's Jenkins setup documentation so rebuilds don't hit the same issue.
 
 ---
 
-### #20 — Rosetta Maven Error
+### #4 — Rosetta Maven Error
 
 **Severity:** Medium | **Category:** Docker Architecture Emulation
 
 #### What Happened
 
-Inside the Jenkins container on Mac M1, the Maven build (Stage 3) produced a strange error about CPU architecture:
+Inside the Jenkins container on Mac M1, the Maven build in Stage 3 produced a warning and then crashed:
 
 ```
 WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8)
 ...
-Error: AVX2 instructions not found, Rosetta 2 translation failed
+Error: An AVX2 instruction was encountered but the CPU does not support it.
+Rosetta 2 translation layer: unsupported instruction
+BUILD FAILED
 ```
 
-The build was slow and eventually crashed.
+The build was also extremely slow before it crashed.
 
 #### Root Cause
 
-The Jenkins Docker image was pulled as an AMD64 image on an ARM64 Mac. macOS runs it through Rosetta 2 emulation (Apple's compatibility layer). Maven inside that emulated environment tried to use AVX2 CPU instructions (Advanced Vector Extensions — a performance feature of Intel CPUs) which Rosetta 2 does not emulate.
+Jenkins was running as an AMD64 Docker image (`jenkins/jenkins:lts`) on an ARM64 Mac M1. macOS Rosetta 2 is Apple's compatibility layer — it translates AMD64 instructions to ARM64 in real-time.
 
-#### Exact Fix
+Maven tried to use **AVX2** instructions (Advanced Vector Extensions 2 — a set of special high-performance CPU instructions available on Intel chips). Rosetta 2 does not emulate AVX2. The translation failed and the build crashed.
 
-Use the ARM64 version of the Jenkins image to avoid emulation entirely:
+The extra slowness was from all other AMD64 instructions being emulated (translated) in real-time — expensive on the CPU.
+
+#### How to Diagnose
 
 ```bash
-# Pull the native ARM64 Jenkins image
-docker pull jenkins/jenkins:lts-jdk21
+# Check what platform the Jenkins container is running as
+docker inspect jenkins | grep -i platform
 
-# Or explicitly pull ARM64 on Mac
+# Check inside the container
+docker exec jenkins uname -m
+# If it shows x86_64, you're running AMD64 emulated on ARM64 Mac
+# If it shows aarch64, you're running native ARM64
+```
+
+#### Exact Fix (Step by Step)
+
+Use the native **ARM64 Jenkins image** to eliminate Rosetta 2 emulation entirely:
+
+```bash
+# Stop and remove the old Jenkins container
+docker stop jenkins && docker rm jenkins
+
+# Pull the native ARM64 Jenkins image
 docker pull --platform linux/arm64 jenkins/jenkins:lts-jdk21
 
+# Recreate Jenkins with native ARM64 platform
 docker run -d \
   --name jenkins \
-  --platform linux/arm64 \   # ← run native ARM64
+  --platform linux/arm64 \
   --dns 8.8.8.8 \
   --dns 8.8.4.4 \
   -p 9090:8080 \
   -v jenkins_home:/var/jenkins_home \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $(which docker):/usr/bin/docker \
   jenkins/jenkins:lts-jdk21
 ```
 
-#### Interview Answer
+The Maven build now runs natively on ARM64 — no translation layer, no AVX2 issue, 3-5x faster.
 
-> "Running Jenkins on Mac M1 in an AMD64 Docker image caused Rosetta 2 emulation failures — specifically around AVX2 instructions that Rosetta doesn't support. The fix was using the native ARM64 Jenkins image. This is a broader lesson about Mac M1 development: always pull native ARM64 images for your development tools, and use cross-compilation (Buildx) specifically for the production artifacts that need to run on AMD64 servers."
+**Note:** This is separate from the Buildx fix in #1. Jenkins itself runs ARM64 natively, but the Docker images it *builds* are compiled for both AMD64 and ARM64 using Buildx.
+
+#### Prevention
+
+On any Mac M1/M2 setup, always pull and run Jenkins with `--platform linux/arm64`. Document this in the team setup guide.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** On the FinBank project, Maven builds inside the Jenkins container were very slow and eventually crashed with an error about AVX2 CPU instructions not being available.
+
+**Task:** I needed Maven to build the Spring Boot backend without crashes.
+
+**Action:** I diagnosed that Jenkins was running an AMD64 Docker image through Rosetta 2 emulation. Rosetta doesn't support AVX2 instructions that Maven uses. I switched to the native ARM64 Jenkins image (`--platform linux/arm64`) which runs without any emulation layer. This is a different concern from the Buildx multi-arch fix — Jenkins itself runs ARM64 natively, while the artifacts it builds target both architectures.
+
+**Result:** Maven builds became significantly faster (no emulation overhead) and the AVX2 crash stopped. This taught me to always check whether development tools are running natively or emulated on Mac M1.
+
+---
+
+### #5 — Trivy Permission Denied
+
+**Severity:** High | **Category:** CI/CD Security Scanning
+
+#### What Happened
+
+Stage 2 of the Jenkins pipeline failed with a permission error when trying to install Trivy (the security scanner):
+
+```
+curl -L https://github.com/aquasecurity/trivy/releases/download/v0.50.0/trivy_0.50.0_Linux-arm64.tar.gz -o trivy.tar.gz
+tar -xzf trivy.tar.gz -C /usr/local/bin trivy
+install: cannot create regular file '/usr/local/bin/trivy': Permission denied
+ERROR: Stage 'Install Tools' failed
+```
+
+#### Root Cause
+
+The Jenkins container runs as the `jenkins` user — not the root user. This is a security best practice: never run application containers as root.
+
+`/usr/local/bin` is a system directory owned by `root`. The `jenkins` user does not have write permission to it. Trying to extract Trivy directly into `/usr/local/bin` fails because `jenkins` cannot write there.
+
+Think of it like trying to put files into a room that's locked — you have the files, but no key to the door.
+
+#### How to Diagnose
+
+```bash
+# Check what user Jenkins runs as
+docker exec jenkins whoami
+# Output: jenkins
+
+# Check permissions on /usr/local/bin
+docker exec jenkins ls -la /usr/local/ | grep bin
+# Output: drwxr-xr-x  root root  /usr/local/bin
+# 'r-x' for others = read and execute only, no write
+
+# Confirm you cannot write there
+docker exec jenkins touch /usr/local/bin/test 2>&1
+# Output: touch: cannot touch '/usr/local/bin/test': Permission denied
+```
+
+#### Exact Fix (Step by Step)
+
+Install Trivy to the `jenkins` user's home directory (`$HOME/bin`) instead of the system directory:
+
+```groovy
+stage('Install Tools') {
+    steps {
+        sh '''
+            # Detect architecture
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+                ARCH_SUFFIX="arm64"
+            else
+                ARCH_SUFFIX="amd64"
+            fi
+
+            # Create a personal bin directory for the jenkins user
+            mkdir -p $HOME/bin
+
+            # Download and extract Trivy to the jenkins user's own directory
+            curl -L "https://github.com/aquasecurity/trivy/releases/download/v0.50.0/trivy_0.50.0_Linux-${ARCH_SUFFIX}.tar.gz" -o trivy.tar.gz
+            tar -xzf trivy.tar.gz -C $HOME/bin trivy
+            chmod +x $HOME/bin/trivy
+
+            # Add $HOME/bin to PATH so Trivy can be called by name
+            export PATH="$HOME/bin:$PATH"
+
+            # Verify it works
+            trivy --version
+        '''
+    }
+}
+```
+
+**Important:** The `export PATH` only lasts for that `sh` block. In later pipeline stages that call `trivy`, add the PATH export at the top of each `sh` block:
+
+```groovy
+stage('Security Scan') {
+    steps {
+        sh '''
+            export PATH="$HOME/bin:$PATH"
+            trivy image --exit-code 1 --severity CRITICAL,HIGH \
+              <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/finbank-backend:1.0.0-${BUILD_NUMBER}
+        '''
+    }
+}
+```
+
+#### Prevention
+
+- Never install tools to `/usr/local/bin` in CI pipelines that run as non-root users.
+- Always install to `$HOME/bin` or `$WORKSPACE` (the pipeline workspace directory).
+- Add Trivy to the Jenkins Docker image in a custom Dockerfile so it does not need to be installed every run.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** In the FinBank Jenkins pipeline, Stage 2 (Install Tools) kept failing with "Permission denied" when trying to install Trivy into `/usr/local/bin`.
+
+**Task:** I needed Trivy to be available in all pipeline stages so the security scanning stage could run.
+
+**Action:** I ran `docker exec jenkins whoami` and confirmed Jenkins runs as the non-root `jenkins` user. `/usr/local/bin` is a system directory writable only by root. The fix was redirecting the Trivy install to `$HOME/bin` — a directory the jenkins user owns — and adding `$HOME/bin` to PATH so Trivy is callable by name in subsequent stages.
+
+**Result:** Stage 2 completed without permission errors and Trivy security scanning in Stage 7 worked correctly. I also noted this is a good security practice: running CI as non-root means a compromised build cannot modify system binaries.
 
 ---
 
@@ -298,514 +609,1162 @@ docker run -d \
 
 ---
 
-### #3 — Jenkins Credential Mismatch
+### #6 — Jenkins Credential Mismatch
 
 **Severity:** Critical | **Category:** Jenkins Configuration
 
 #### What Happened
 
-Stage 9 of the pipeline (Update Helm Chart in GitHub) kept failing with authentication errors:
+Stage 9 of the pipeline (Update Helm Chart in GitHub) failed every run with authentication errors:
 
 ```
-remote: Invalid username or password
-fatal: Authentication failed for 'https://github.com/IndiaFinBank/Infra_FinBank.git'
-ERROR: ERROR during step[withCredentials]
-credential 'github-credentials' not found
+remote: Invalid username or password.
+fatal: Authentication failed for 'https://github.com/Anshujee/FinBank-DevOps-Notes.git'
+ERROR: ERROR during step
+  hudson.plugins.git.GitException: Command "git push" returned status code 128
+  credentialId 'github-credentials' not found in the credential store
 ```
 
-The GitHub credentials were definitely configured in Jenkins. I verified them manually. But the pipeline kept reporting "not found".
+The credentials were definitely configured in Jenkins — I could see them in the Jenkins UI. But the pipeline kept saying "not found".
 
 #### Root Cause
 
-The Jenkinsfile referenced credential ID `'github-credentials'` (with a hyphen). But when the credential was created in Jenkins UI, the ID was stored as `'github credentials'` (with a space).
+The Jenkinsfile referenced credential ID `'github-credentials'` (with a hyphen). The credential in Jenkins was created with ID `'github credentials'` (with a **space**).
 
-```groovy
-// In Jenkinsfile — what was written
-credentialsId: 'github-credentials'   // hyphen
-
-// In Jenkins → Credentials — what was actually stored
-ID: 'github credentials'              // space ← Jenkins is case-sensitive and character-sensitive
+```
+Jenkinsfile used:    'github-credentials'   ← hyphen
+Jenkins stored:      'github credentials'   ← space
 ```
 
-Jenkins credential IDs are exact-match strings. One character difference means "not found".
+Jenkins does **exact string matching** on credential IDs. One character difference (hyphen vs space) means it cannot find the credential. It throws "not found" instead of "wrong credential" because — from Jenkins' perspective — that specific ID genuinely does not exist.
 
-#### Exact Fix
+#### How to Diagnose
 
-Two options — pick one and be consistent:
+```bash
+# Go to Jenkins → Manage Jenkins → Credentials → Global → (any credential) → Update
+# Look at the "ID" field EXACTLY as stored — character by character
 
-**Option A — Change Jenkins Jenkinsfile to match the credential ID in Jenkins:**
+# In your Jenkinsfile, search for credentialsId
+grep -n "credentialsId" Jenkinsfile
+```
+
+Compare the two strings character by character. Look for: spaces vs hyphens, uppercase vs lowercase, underscores vs hyphens.
+
+#### Exact Fix (Step by Step)
+
+**Option A — Change the Jenkinsfile to match what Jenkins has stored:**
+
 ```groovy
 withCredentials([
     usernamePassword(
-        credentialsId: 'github credentials',  // ← SPACE to match what's in Jenkins
+        credentialsId: 'github credentials',  // ← add a space to match Jenkins
         usernameVariable: 'GIT_USER',
         passwordVariable: 'GIT_TOKEN'
     )
 ])
 ```
 
-**Option B — Rename the Jenkins credential ID to match the Jenkinsfile:**
-- Go to Jenkins → Manage Jenkins → Credentials → Global
-- Click the credential → Update
-- Change ID field from `github credentials` to `github-credentials`
+**Option B (recommended) — Rename the Jenkins credential to match the Jenkinsfile standard:**
 
-**Best practice:** Standardize on hyphen-separated IDs (no spaces) for all credentials. The official format:
+1. Go to Jenkins → Manage Jenkins → Credentials → Global
+2. Find the GitHub credential → click the dropdown → Update
+3. In the **ID** field, change `github credentials` to `github-credentials`
+4. Save
+
+**Standard naming convention for all FinBank credentials:**
 ```
-aws-access-key-id
-aws-secret-access-key
-sonarqube-token
-github-credentials
+github-credentials          ← GitHub PAT
+aws-access-key-id           ← AWS access key
+aws-secret-access-key       ← AWS secret key
+sonarqube-token             ← SonarQube analysis token
+dockerhub-credentials       ← Docker Hub login (if needed)
 ```
 
-#### Interview Answer
+Rule: all lowercase, words separated by hyphens, no spaces, no underscores.
 
-> "The Jenkins pipeline kept saying credential 'github-credentials' not found, even though I could see it in the Jenkins credentials list. After 20 minutes of checking everything else — GitHub PAT expiry, network access, webhook config — I finally compared the ID string character by character. The Jenkinsfile used a hyphen: 'github-credentials'. The actual stored credential used a space: 'github credentials'. Jenkins does exact string matching on credential IDs, so that single character difference meant it could never find it. The lesson is to establish a naming convention for credentials — I now always use lowercase hyphen-separated IDs — and copy IDs directly from the Jenkins UI, never type them by hand."
+#### Prevention
+
+- Write all credential IDs in a shared document before setting them up in Jenkins.
+- Copy credential IDs from Jenkins UI using copy-paste — never type them by hand.
+- Use a consistent convention from day one: lowercase-hyphenated.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** In the FinBank Jenkins pipeline, Stage 9 — which pushes updated Helm chart values to GitHub — failed every run with "credential not found" even though the credential was visible in the Jenkins UI.
+
+**Task:** I needed Stage 9 to authenticate to GitHub and push the updated image tag so ArgoCD could pick it up.
+
+**Action:** I spent about 20 minutes checking GitHub PAT expiry, network access, webhook configuration — everything looked fine. Eventually I compared the credential ID in the Jenkinsfile against the Jenkins UI string character by character. The Jenkinsfile had `github-credentials` (hyphen); Jenkins had stored it as `github credentials` (space). Jenkins uses exact string matching on IDs. I renamed the credential in Jenkins to use a hyphen. I also established a naming convention: all lowercase, hyphen-separated, no spaces.
+
+**Result:** Stage 9 authenticated and pushed successfully. I documented the credential naming convention in the project README so future teammates don't hit the same issue.
 
 ---
 
-### #21 — Staging Image Tag Never Updated
+### #7 — Staging Image Tag Never Updated
 
 **Severity:** High | **Category:** Jenkins CI/CD, GitOps
 
 #### What Happened
 
-After Jenkins pipeline ran successfully (green status, all stages passed), I noticed dev environment was running the new image (1.0.0-44) but staging was still on the old image (1.0.0-38). ArgoCD showed staging as "Synced and Healthy" — but with the old tag.
+After a successful Jenkins pipeline run (all 9 stages green), the dev environment was running the new image tag `1.0.0-44`. Staging was still on `1.0.0-38`. ArgoCD showed staging as "Synced and Healthy" — which was confusing because it was running the old version.
 
 #### Root Cause
 
-Stage 9 of the Jenkinsfile only updated the `values.yaml` file (dev defaults), not the environment-specific override files:
+Stage 9 of the Jenkinsfile updated only `values.yaml` (the dev defaults), not the environment-specific override files:
 
 ```bash
-# WRONG — only updating dev values file
+# What Stage 9 was doing — WRONG
 sed -i 's|  tag:.*|  tag: 1.0.0-44|' helm/finbank-backend/values.yaml
-# values-staging.yaml NOT updated → staging ArgoCD app still sees old tag
+# Only updates dev. Staging and prod Helm values not touched.
 ```
 
-The ArgoCD staging app uses `values-staging.yaml` as its values file. Since that file still had `tag: 1.0.0-38`, ArgoCD deployed 1.0.0-38 — and reported it as "Synced" because it matched Git exactly. Git had the wrong value.
+ArgoCD's staging application uses `values-staging.yaml` as its values file. Since that file still had `tag: 1.0.0-38`, ArgoCD deployed `1.0.0-38`. And reported it as "Synced" — because the cluster matched Git exactly. Git itself had the wrong value.
 
-#### Exact Fix
+This is an important lesson: **"Synced" in ArgoCD means "cluster matches Git" — not "cluster has the latest build"**. If Git is wrong, ArgoCD will dutifully deploy the wrong version.
+
+#### How to Diagnose
+
+```bash
+# Check what image tag is in each values file
+grep "tag:" helm/finbank-backend/values.yaml
+grep "tag:" helm/finbank-backend/values-staging.yaml
+grep "tag:" helm/finbank-backend/values-prod.yaml
+
+# Check what image is actually running in staging
+kubectl get pods -n finbank-stage -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}'
+
+# Check what ArgoCD thinks staging is synced to
+argocd app get finbank-backend-staging
+```
+
+#### Exact Fix (Step by Step)
 
 Update ALL three values files in Stage 9:
 
-```bash
-# CORRECT — update all 3 environment values files
-NEW_TAG="1.0.0-${BUILD_NUMBER}"
+```groovy
+stage('Update Helm Chart Image Tags') {
+    steps {
+        withCredentials([
+            usernamePassword(
+                credentialsId: 'github-credentials',
+                usernameVariable: 'GIT_USER',
+                passwordVariable: 'GIT_TOKEN'
+            )
+        ]) {
+            sh '''
+                NEW_TAG="1.0.0-${BUILD_NUMBER}"
 
-sed -i "s|  tag:.*|  tag: ${NEW_TAG}|g" helm/finbank-backend/values.yaml
-sed -i "s|  tag:.*|  tag: ${NEW_TAG}|g" helm/finbank-backend/values-staging.yaml
-sed -i "s|  tag:.*|  tag: ${NEW_TAG}|g" helm/finbank-backend/values-prod.yaml
+                git config user.email "jenkins@finbank.local"
+                git config user.name "Jenkins CI"
 
-git add helm/finbank-backend/values.yaml \
-        helm/finbank-backend/values-staging.yaml \
-        helm/finbank-backend/values-prod.yaml
+                # ← Update ALL THREE environment values files
+                sed -i "s|  tag:.*|  tag: ${NEW_TAG}|g" helm/finbank-backend/values.yaml
+                sed -i "s|  tag:.*|  tag: ${NEW_TAG}|g" helm/finbank-backend/values-staging.yaml
+                sed -i "s|  tag:.*|  tag: ${NEW_TAG}|g" helm/finbank-backend/values-prod.yaml
 
-git commit -m "CI: Update finbank-backend image tag to ${NEW_TAG} [skip ci]"
-git push
+                # Stage all three files
+                git add helm/finbank-backend/values.yaml \
+                        helm/finbank-backend/values-staging.yaml \
+                        helm/finbank-backend/values-prod.yaml
+
+                git commit -m "CI: Update finbank-backend image to ${NEW_TAG} [skip ci]"
+
+                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/Anshujee/FinBank-DevOps-Notes.git HEAD:main
+            '''
+        }
+    }
+}
 ```
 
-#### Interview Answer
+#### Prevention
 
-> "After a successful pipeline run, I noticed staging was still running the old image while dev had the new one. ArgoCD showed staging as Synced and Healthy, which confused me — it meant the cluster matched Git, but Git had the wrong value. The pipeline's Stage 9 only updated values.yaml (the dev defaults) but not values-staging.yaml which the staging ArgoCD app actually uses. I updated Stage 9 to use sed on all three values files in the same commit. This also taught me that 'Synced' in ArgoCD means 'cluster matches Git' — not 'cluster has the latest version'. If Git itself is wrong, ArgoCD will dutifully deploy the wrong version."
+- After every pipeline run, verify all environments by running:
+  ```bash
+  grep "tag:" helm/finbank-backend/values*.yaml
+  ```
+  All should show the same tag.
+- Add a post-stage validation step in Jenkins that checks all three files match before declaring success.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** In the FinBank project, after successful Jenkins pipeline runs, staging was consistently running older image versions even though dev was updated. ArgoCD showed staging as "Synced and Healthy" which made it harder to spot the problem.
+
+**Task:** I needed all environments to receive the new image tag after each pipeline run.
+
+**Action:** I compared the tag values across `values.yaml`, `values-staging.yaml`, and `values-prod.yaml` in Git. Only `values.yaml` had the new tag. Stage 9 only ran `sed` on the base values file. I updated Stage 9 to run `sed` on all three files in the same commit and push. I also learned that ArgoCD's "Synced" status means the cluster matches Git — not that Git is correct. A stale Git value causes a stale deployment that ArgoCD calls "healthy."
+
+**Result:** All three environments now update simultaneously after each pipeline run. The `[skip ci]` flag in the commit message also prevents an infinite loop where the Git push would trigger another pipeline run.
 
 ---
 
-### #22 — IP Exhaustion in Staging
+### #8 — zsh Bracket Expansion Breaks Terraform
 
-**Severity:** Medium | **Category:** Kubernetes Networking, Resource Planning
+**Severity:** Medium | **Category:** Shell Scripting, Terraform
 
 #### What Happened
 
-After adding staging environment pods, several staging pods stayed in Pending state indefinitely. Running `kubectl describe pod <pending-pod>` showed:
+When trying to override a Terraform variable from the command line to test a staging configuration, the command crashed with a bizarre error:
 
 ```
-Warning  FailedScheduling  pod/finbank-backend-staging-xxx
-  failed to assign an IP address to container:
-  VPC subnet has insufficient available IP addresses
+zsh: no matches found: {ap-south-1a,ap-south-1b}
 ```
 
-All dev pods were running fine. Only staging was affected.
+The command was:
+```bash
+terraform apply -var="availability_zones={ap-south-1a,ap-south-1b}"
+```
+
+Terraform never even started. Zsh intercepted the argument and threw an error.
 
 #### Root Cause
 
-AWS EKS uses the VPC CNI (Container Networking Interface) — each pod gets a real VPC IP address, not a virtual overlay IP. AWS allocates IP addresses from the subnet per ENI (Elastic Network Interface), and each EC2 instance type can only attach a limited number of ENIs with a limited number of IPs per ENI.
+Zsh (the default macOS shell since Catalina) has a feature called **brace expansion**. When zsh sees `{ap-south-1a,ap-south-1b}` in a command, it tries to expand it into multiple separate arguments: `ap-south-1a` and `ap-south-1b` — like two separate filenames.
 
-**t3.medium limits:** 3 ENIs × 6 IPs per ENI = 18 IPs per node. But some IPs are reserved for the node itself.
+In this context, zsh tries to find files or directories named `ap-south-1a` and `ap-south-1b` in the current directory. They don't exist, so zsh throws "no matches found" and never even runs the command.
 
-After accounting for dev pods, system pods (kube-system), and ArgoCD pods, the remaining IP capacity was not enough to schedule all staging pods when replicaCount in values-staging.yaml was 2 or more.
+Terraform never sees the argument at all. This is a shell-level error, not a Terraform error.
 
-#### Exact Fix
+#### How to Diagnose
 
-**Immediate:** Reduce replicaCount to 1 in all staging values files:
-
-```yaml
-# values-staging.yaml
-replicaCount: 1    # ← reduced from 2 to 1, saves 3 IPs (one per service)
-```
-
-**Long-term option A:** Scale up the node group to add more EC2 instances:
 ```bash
-aws eks update-nodegroup-config \
-  --cluster-name finbank-dev \
-  --nodegroup-name finbank-dev-nodes \
-  --scaling-config minSize=1,maxSize=5,desiredSize=4 \
-  --region ap-south-1
+# Test if zsh is expanding your braces
+echo {ap-south-1a,ap-south-1b}
+# If it prints two separate words, zsh is expanding them
+# Output: ap-south-1a ap-south-1b
+
+# Check what shell you're using
+echo $SHELL
+# Output: /bin/zsh
 ```
 
-**Long-term option B:** Use prefix assignment mode which gives each ENI 256 IPs instead of 6:
+#### Exact Fix (Step by Step)
+
+**Option A — Escape the braces with backslashes:**
+
 ```bash
-kubectl set env daemonset aws-node \
-  -n kube-system \
-  ENABLE_PREFIX_DELEGATION=true
+terraform apply -var="availability_zones=\{ap-south-1a,ap-south-1b\}"
 ```
 
-#### Interview Answer
+**Option B (recommended) — Use single quotes around the entire value:**
 
-> "Staging pods were stuck in Pending with an error about insufficient VPC IP addresses. This is a common EKS gotcha — pods get real VPC IPs, not virtual overlay addresses. Each t3.medium can handle about 17 pods based on ENI count and IPs per ENI. With dev environment, system pods, ArgoCD, and monitoring all sharing the cluster, we ran out of IP capacity when staging pods with replicaCount 2 tried to schedule. The immediate fix was reducing staging to 1 replica per service. The permanent fix for production would be switching to prefix delegation mode in the AWS VPC CNI, which multiplies available IPs by 256 per ENI."
+```bash
+terraform apply -var='availability_zones={ap-south-1a,ap-south-1b}'
+```
+
+Single quotes in bash/zsh prevent ALL shell interpretation of the content inside. The string is passed to Terraform exactly as written.
+
+**Option C — Use a .tfvars file instead of -var flags:**
+
+```hcl
+# terraform.tfvars or staging.tfvars
+availability_zones = ["ap-south-1a", "ap-south-1b"]
+```
+
+```bash
+terraform apply -var-file="staging.tfvars"
+```
+
+This is the cleanest approach for multi-value variables and avoids shell escaping entirely.
+
+#### Prevention
+
+- For complex variable values (lists, maps, strings with special characters), always use `.tfvars` files rather than `-var` flags.
+- If using `-var` flags with list/map values, always use single quotes.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** While testing Terraform configuration changes for the FinBank staging environment, a `terraform apply` command with a list variable in `-var` flag failed with "zsh: no matches found" before Terraform even started.
+
+**Task:** I needed to pass a list of availability zones as a Terraform variable override from the command line.
+
+**Action:** I recognised the error was from zsh's brace expansion feature, not Terraform. Zsh was intercepting `{ap-south-1a,ap-south-1b}` and trying to glob-expand it into filenames. Two fixes: use single quotes around the value to prevent shell interpretation, or move the variable to a `.tfvars` file. I switched to a `staging.tfvars` file which is cleaner and avoids shell escaping issues entirely.
+
+**Result:** Terraform accepted the variable correctly. I documented this in the team notes: always use `.tfvars` files for list and map variables, never `-var` flags for complex types on zsh.
 
 ---
 
-## Category C — Kubernetes Pod Issues
+### #9 — New CVEs Block Build #43
+
+**Severity:** Critical | **Category:** Security Scanning, Dependency Management
+
+#### What Happened
+
+Build #43 in the Jenkins pipeline passed all stages through Stage 6 (Docker push) but failed in Stage 7 (Trivy Security Scan):
+
+```
+2026-05-14T09:23:11.442Z  INFO  Detected OS: debian 12.5
+2026-05-14T09:23:11.443Z  INFO  Detecting Debian vulnerabilities...
+2026-05-14T09:23:45.211Z  INFO  Number of language-specific files: 1
+
+finbank-backend:1.0.0-43 (jar)
+===============================
+Total: 2 (CRITICAL: 2, HIGH: 0)
+
+┌─────────────────────────────────────┬────────────────────┬──────────┬──────────────────────────────────────┐
+│ Library                             │ Vulnerability ID   │ Severity │ Fixed Version                        │
+├─────────────────────────────────────┼────────────────────┼──────────┼──────────────────────────────────────┤
+│ spring-boot-3.5.13.jar              │ CVE-2026-40973     │ CRITICAL │ 3.5.14                               │
+├─────────────────────────────────────┼────────────────────┼──────────┼──────────────────────────────────────┤
+│ netty-codec-http-4.1.108.Final.jar  │ CVE-2026-42583     │ CRITICAL │ 4.1.133.Final                        │
+└─────────────────────────────────────┴────────────────────┴──────────┴──────────────────────────────────────┘
+
+FAIL: 2 CRITICAL vulnerabilities found. Blocking build.
+ERROR: Build failed: exit code 1
+```
+
+The image was never deployed. Builds #44, #45, #46 also failed until dependencies were upgraded.
+
+#### Root Cause
+
+**CVE-2026-40973** — A vulnerability in Spring Boot 3.5.13 that allows malicious file writes through temporary directory path traversal. An attacker can write files outside the intended temp directory.
+
+**CVE-2026-42583** — A vulnerability in Netty 4.1.108 (an HTTP networking library that Spring Boot uses internally) that allows memory exhaustion under specific HTTP/2 connection patterns.
+
+The Trivy scanner in Stage 7 is configured with `--exit-code 1` for CRITICAL and HIGH severity, which means it blocks the build if any such vulnerabilities are found. This is the correct behavior — the pipeline deliberately refuses to deploy vulnerable images.
+
+#### How to Diagnose
+
+```bash
+# Scan the image locally to see what Trivy finds
+export PATH="$HOME/bin:$PATH"
+trivy image \
+  --severity CRITICAL,HIGH \
+  <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/finbank-backend:1.0.0-43
+
+# Check your current Spring Boot version in pom.xml
+grep -A2 "spring-boot" backend/pom.xml | grep "version"
+
+# Check what Netty version Spring Boot uses (transitive dependency)
+cd backend && mvn dependency:tree | grep netty
+```
+
+#### Exact Fix (Step by Step)
+
+**Step 1: Update Spring Boot version in `backend/pom.xml`**
+
+```xml
+<!-- backend/pom.xml — change this line -->
+<parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.14</version>  <!-- ← was 3.5.13, changed to 3.5.14 -->
+    <relativePath/>
+</parent>
+```
+
+**Step 2: Force the Netty version to fix CVE-2026-42583**
+
+Spring Boot manages Netty as a transitive dependency (Netty is pulled in through Spring WebFlux or Spring Boot Web). To force a specific Netty version, add a property in `pom.xml`:
+
+```xml
+<!-- In backend/pom.xml, inside the <properties> section -->
+<properties>
+    <java.version>17</java.version>
+    <netty.version>4.1.133.Final</netty.version>  <!-- ← force safe Netty version -->
+</properties>
+```
+
+Spring Boot's dependency management respects this property and will use `4.1.133.Final` instead of the vulnerable `4.1.108.Final`.
+
+**Step 3: Verify the fix locally before pushing**
+
+```bash
+cd backend
+mvn dependency:tree | grep netty
+# Should show: netty-codec-http:4.1.133.Final
+
+mvn clean package -DskipTests
+docker build -t finbank-backend:test .
+trivy image --severity CRITICAL,HIGH finbank-backend:test
+# Should show: Total: 0 (CRITICAL: 0, HIGH: 0)
+```
+
+**Step 4: Commit and push to trigger a new pipeline build**
+
+```bash
+git add backend/pom.xml
+git commit -m "fix: upgrade Spring Boot 3.5.14 and force Netty 4.1.133 to fix CVE-2026-40973, CVE-2026-42583"
+git push origin main
+```
+
+Build #47 (or whichever is next) should pass Trivy scan with zero CRITICAL/HIGH findings.
+
+#### Prevention
+
+- Subscribe to Spring Boot security advisories: `https://spring.io/security`
+- Run `trivy image` locally before committing code that changes dependencies.
+- Set up a Dependabot or Renovate bot to automatically raise PRs when known-vulnerable library versions are detected.
+- Review Trivy output in Jenkins every build — even when it passes — to track MEDIUM severity items before they become CRITICAL.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** On build #43 of the FinBank backend pipeline, the Trivy security scan stage found two CRITICAL CVEs — one in Spring Boot 3.5.13 and one in Netty 4.1.108. The pipeline was configured to block deployment for any CRITICAL vulnerability, so builds #43 through #46 all failed at Stage 7. The new version was not deployed to any environment.
+
+**Task:** I needed to upgrade the affected libraries so the image passed Trivy's security gate and could be deployed.
+
+**Action:** I checked the CVE details — CVE-2026-40973 was a temp directory path traversal in Spring Boot, fixed in 3.5.14. CVE-2026-42583 was a Netty memory exhaustion issue, fixed in 4.1.133.Final. I updated `pom.xml` to use Spring Boot 3.5.14 as the parent version. Netty is a transitive dependency (pulled in by Spring Boot), so I added `<netty.version>4.1.133.Final</netty.version>` to the properties section to force the safe version. I verified with `mvn dependency:tree | grep netty` and ran a local Trivy scan to confirm zero CRITICAL findings before pushing.
+
+**Result:** Build #47 passed Trivy with 0 CRITICAL, 0 HIGH findings and deployed successfully. I also added a note in our sprint retrospective to subscribe to Spring Boot security advisories and check Trivy output weekly even on passing builds.
 
 ---
 
-### #5 — Localhost in values.yaml
+## Category C — Kubernetes & EKS
+
+---
+
+### #10 — localhost in values.yaml
 
 **Severity:** Critical | **Category:** Kubernetes Configuration
 
 #### What Happened
 
-After the first successful ArgoCD deployment, all three services (backend, frontend, analytics) went into CrashLoopBackOff. Backend logs showed:
+After the first successful ArgoCD sync, all three services (backend, frontend, analytics) went into CrashLoopBackOff. Backend pod logs showed:
 
 ```
-com.mysql.cj.jdbc.exceptions.CommunicationsException:
-  Communications link failure
-  The last packet sent successfully to the server was 0 milliseconds ago.
-  The driver has not received any packets from the server.
-  url: jdbc:mysql://localhost:3306/finsecure_db
+com.mysql.cj.jdbc.exceptions.CommunicationsException: Communications link failure
+The last packet sent successfully to the server was 0 milliseconds ago.
+The driver has not received any packets from the server.
+Caused by: java.net.ConnectException: Connection refused (Connection refused)
+  url: jdbc:mysql://localhost:3306/finbank_dev_db
 ```
 
 #### Root Cause
 
-The Helm values.yaml had placeholder values from local development:
+The Helm `values.yaml` still had placeholder values from local laptop development:
 
 ```yaml
-# helm/finbank-backend/values.yaml — WRONG initial values
 database:
-  host: localhost    # ← only works on your laptop, not inside Kubernetes
-  port: 3306
-  name: finsecure_db
-
+  host: localhost    # ← on laptop this means your own machine
 redis:
   host: localhost    # ← same problem
-  port: 6379
 ```
 
-Inside Kubernetes, each pod is isolated. `localhost` inside a pod refers to that pod itself, not your Mac, not RDS, not Redis. A pod trying to connect to `localhost:3306` is trying to connect to a MySQL server that doesn't exist inside that same pod.
+Inside Kubernetes, **every pod is its own isolated network**. `localhost` inside a pod means that specific pod's own loopback — not your Mac, not RDS, not Redis. A backend pod trying to connect to `localhost:3306` is trying to find a MySQL server running inside itself. There is none.
 
-#### Exact Fix
+#### How to Diagnose
 
-Replace all localhost values with actual AWS endpoint hostnames:
-
-```yaml
-# helm/finbank-backend/values.yaml — CORRECT
-database:
-  host: finbank-dev-mysql.c5abc123def.ap-south-1.rds.amazonaws.com
-  port: 3306
-  name: finsecure_db
-
-redis:
-  host: finbank-dev-redis.abc123.ng.0001.aps1.cache.amazonaws.com
-  port: 6379
-```
-
-Get the actual endpoints:
 ```bash
-# RDS endpoint
+# Check what endpoint the pod is using
+kubectl exec -it deployment/finbank-backend -n finbank-dev -- env | grep -E "DB_HOST|REDIS|DATASOURCE"
+
+# Get the actual RDS endpoint
 aws rds describe-db-instances \
   --db-instance-identifier finbank-dev-mysql \
-  --query "DBInstances[0].Endpoint.Address" --output text --region ap-south-1
+  --query "DBInstances[0].Endpoint.Address" \
+  --output text --region ap-south-1
 
-# ElastiCache Redis endpoint
+# Get the actual Redis endpoint
 aws elasticache describe-cache-clusters \
   --cache-cluster-id finbank-dev-redis \
   --show-cache-node-info \
-  --query "CacheClusters[0].CacheNodes[0].Endpoint.Address" --output text --region ap-south-1
+  --query "CacheClusters[0].CacheNodes[0].Endpoint.Address" \
+  --output text --region ap-south-1
 ```
 
-#### Interview Answer
+#### Exact Fix (Step by Step)
 
-> "After first deployment, all pods crashed with 'Communications link failure' trying to connect to localhost:3306. In Kubernetes, each pod is its own isolated network namespace — localhost means that pod, not any other service. The Helm values.yaml still had localhost from local development. I replaced them with the actual RDS and ElastiCache endpoint hostnames from AWS. This is a very common first-time Kubernetes mistake: localhost works on your laptop but means something completely different inside a container."
+**Step 1: Get real endpoints from AWS**
+
+```bash
+# RDS
+aws rds describe-db-instances \
+  --db-instance-identifier finbank-dev-mysql \
+  --query "DBInstances[0].Endpoint.Address" \
+  --output text --region ap-south-1
+# Output: finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com
+
+# Redis
+aws elasticache describe-cache-clusters \
+  --cache-cluster-id finbank-dev-redis \
+  --show-cache-node-info \
+  --query "CacheClusters[0].CacheNodes[0].Endpoint.Address" \
+  --output text --region ap-south-1
+# Output: finbank-dev-redis.eafcpo.0001.aps1.cache.amazonaws.com
+```
+
+**Step 2: Update `helm/finbank-backend/values.yaml`**
+
+```yaml
+env:
+  DB_HOST: "finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com"
+  DB_PORT: "3306"
+  DB_NAME: "finbank_dev_db"
+  SPRING_DATA_REDIS_HOST: "finbank-dev-redis.eafcpo.0001.aps1.cache.amazonaws.com"
+  SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_DATABASE: "0"
+```
+
+**Step 3: Update `values-staging.yaml` for staging**
+
+```yaml
+env:
+  DB_HOST: "finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com"
+  DB_NAME: "finbank_staging_db"
+  SPRING_DATA_REDIS_DATABASE: "1"    # staging uses Redis database 1
+```
+
+**Step 4: Commit and push — ArgoCD auto-syncs**
+
+```bash
+git add helm/
+git commit -m "fix: replace localhost with real AWS RDS and Redis endpoints"
+git push origin main
+# ArgoCD syncs within 3 minutes, or force it:
+argocd app sync finbank-backend-dev
+```
+
+#### Prevention
+
+- Never commit `localhost` in any Helm values file. Add a CI check that fails if `grep -r "localhost" helm/` finds anything in values files.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** First ArgoCD deployment of all three FinBank microservices to EKS — all pods went into CrashLoopBackOff immediately after sync.
+
+**Task:** Diagnose and fix the crash so all three services could start and connect to their data stores.
+
+**Action:** Pod logs showed "Connection refused" to `localhost:3306`. I checked the Helm `values.yaml` and found `host: localhost` for both database and Redis — left from local development. In Kubernetes, `localhost` is each pod's own loopback; there is no MySQL there. I fetched the actual RDS and ElastiCache endpoints from AWS CLI and updated all Helm values files. ArgoCD resynced and pods came up healthy.
+
+**Result:** All three services started. This is a very common first-Kubernetes mistake. I now always validate no Helm values file contains `localhost` before any deployment.
 
 ---
 
-### #6 — Empty RDS Schema
+### #11 — Empty RDS Schema
 
-**Severity:** Critical | **Category:** Database Management
+**Severity:** Critical | **Category:** Database Initialisation
 
 #### What Happened
 
-After fixing the localhost issue (#5), pods started successfully but the backend crashed during startup with:
+After fixing the localhost issue (#10), pods connected to RDS but crashed on Spring Boot startup:
 
 ```
-java.sql.SQLSyntaxErrorException: Table 'finsecure_db.users' doesn't exist
-org.springframework.beans.factory.BeanCreationException: Error creating bean 'accountRepository'
+java.sql.SQLSyntaxErrorException: Table 'finbank_dev_db.users' doesn't exist
+org.springframework.beans.factory.BeanCreationException:
+  Error creating bean with name 'userRepository': Invocation of init method failed
 Application startup failure
 ```
 
-The RDS instance was running and connectable, but had no tables.
+RDS was running. Connection was successful. But the database had no tables.
 
 #### Root Cause
 
-Terraform created the **MySQL server** and the **empty database** (`finsecure_db`). But Spring Boot needs tables — `users`, `accounts`, `transactions`, `loans` — to exist before the app can start.
+Terraform created the MySQL server and the empty database (`finbank_dev_db`). It did not create tables. Spring Boot's JPA tries to find tables like `users`, `accounts`, `transactions` on startup. When they don't exist it fails immediately.
 
-Without database schema initialisation, Spring Boot's JPA tries to find the `users` table on startup, can't find it, and crashes.
+#### How to Diagnose
 
-#### Exact Fix
+```bash
+mysql -h finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com \
+  -u finbank_admin -p<YOUR_DB_PASSWORD> finbank_dev_db \
+  -e "SHOW TABLES;"
+# Output: Empty set
+```
 
-Add `spring.jpa.hibernate.ddl-auto=update` to the Spring Boot configuration, or set it as an environment variable in Helm values:
+#### Exact Fix (Step by Step)
+
+Set Spring Boot's DDL auto mode to `update` in Helm values:
 
 ```yaml
-# In values.yaml under env section
+# helm/finbank-backend/values.yaml
 env:
-  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"    # ← create tables if they don't exist
-  SPRING_JPA_SHOW_SQL: "false"
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+  # "update": if tables don't exist → create them
+  #            if tables exist → leave data alone, alter only new columns
   SPRING_JPA_DATABASE_PLATFORM: "org.hibernate.dialect.MySQL8Dialect"
+  SPRING_JPA_SHOW_SQL: "false"
 ```
 
-With `ddl-auto: update`:
-- If tables exist → Spring Boot uses them as-is
-- If tables are missing → Spring Boot creates them based on Java entity classes
-- It never drops existing data
+For production environments — use `validate` + Flyway migrations instead:
 
-**For production** — never use `update`, use `validate` or Flyway/Liquibase migrations:
 ```yaml
-# Production: verify schema matches entity, fail if it doesn't
-SPRING_JPA_HIBERNATE_DDL_AUTO: "validate"
+# helm/finbank-backend/values-prod.yaml
+env:
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "validate"
+  # "validate": verify DB schema matches entity classes; fail loudly if mismatch; NEVER modify DB
 ```
 
-#### Interview Answer
+#### Prevention
 
-> "After getting past the localhost connection error, all backend pods failed during startup with 'Table users doesn't exist'. Terraform creates the RDS server and the empty database, but it doesn't create tables. Spring Boot's JPA doesn't know what tables to expect unless you tell it. Adding `spring.jpa.hibernate.ddl-auto=update` as an environment variable solved it — Spring Boot automatically created all tables based on the entity class definitions. For production, I would use `validate` mode and manage schema changes through Flyway migrations to prevent accidental schema changes during deployments."
+- Dev: `ddl-auto: update`. Staging/prod: `ddl-auto: validate` + Flyway.
+- Add a post-deploy check: run `SHOW TABLES` and assert expected tables exist.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** After fixing localhost connectivity in FinBank, backend pods were now reaching RDS but crashing on startup with "Table users doesn't exist."
+
+**Task:** Get the database schema in place so Spring Boot could start.
+
+**Action:** I connected to RDS with `mysql` CLI and confirmed the database was empty — Terraform creates the server and database, not the schema. I set `spring.jpa.hibernate.ddl-auto=update` as an environment variable in the Helm values. Spring Boot read all `@Entity` classes and created the tables on first startup.
+
+**Result:** All tables were created automatically. Backend started and API endpoints responded. I noted for prod values to use `validate` mode with Flyway migrations instead.
 
 ---
 
-### #7 — Wrong Spring Profile
+### #12 — Wrong Spring Profile in Staging
 
 **Severity:** High | **Category:** Spring Boot Configuration
 
 #### What Happened
 
-The backend ran fine in dev environment but crashed in staging. Staging pod logs showed:
+Backend worked in dev but crashed in staging with the same `localhost:3306` connection error even though staging Helm values had the correct staging endpoint:
 
 ```
-HikariPool-1 - Starting...
 HikariPool-1 - Exception during pool initialization.
-com.mysql.cj.jdbc.exceptions.CommunicationsException:
-  url: jdbc:mysql://localhost:3306/finsecure_db
+url: jdbc:mysql://localhost:3306/finbank_dev_db
 ```
 
-The staging Helm values had the correct staging RDS endpoint, but the pod was still trying to connect to localhost!
+The staging values had the correct `DB_HOST` set. But the pod still tried `localhost`.
 
 #### Root Cause
 
-The staging Helm values file set `profile: dev`:
+The staging Helm values had `SPRING_PROFILES_ACTIVE: "dev"`. The `dev` Spring profile contains hardcoded localhost values in `application-dev.properties`. In Spring Boot 3.x, profile properties override environment variables. So the `dev` profile's `localhost` overrode the correct staging endpoint from the Helm env block.
 
 ```yaml
-# values-staging.yaml — WRONG
+# values-staging.yaml — BUG
 env:
-  SPRING_PROFILES_ACTIVE: "dev"    # ← loads application-dev.properties
+  SPRING_PROFILES_ACTIVE: "dev"    # ← loads application-dev.properties with localhost
 ```
-
-`application-dev.properties` contains:
-```properties
-# application-dev.properties — for local laptop development
-spring.datasource.url=jdbc:mysql://localhost:3306/finsecure_db
-spring.data.redis.host=localhost
-spring.datasource.username=root
-```
-
-The environment variables from the Helm ConfigMap were being overridden by the hardcoded `localhost` values in the `dev` Spring profile. Spring profile properties take priority over environment variables by default in Spring Boot 3.x.
 
 #### Exact Fix
 
-Use `docker` profile for ALL containerised environments (dev, staging, prod). The `docker` profile reads from environment variables, not hardcoded values:
+Use `docker` profile for ALL containerised environments. The `docker` profile reads everything from environment variables — no hardcoded values:
 
 ```yaml
-# values.yaml (dev)
+# values.yaml, values-staging.yaml, values-prod.yaml — ALL use:
 env:
   SPRING_PROFILES_ACTIVE: "docker"
+```
+
+`application-docker.properties`:
+```properties
+spring.datasource.url=jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+spring.datasource.username=${DB_USERNAME}
+spring.datasource.password=${DB_PASSWORD}
+spring.data.redis.host=${SPRING_DATA_REDIS_HOST}
+spring.data.redis.port=${SPRING_DATA_REDIS_PORT}
+```
+
+The environment-specific values (DB_HOST, DB_NAME, REDIS_DATABASE) come from the respective Helm values files.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** FinBank backend connecting to `localhost` in staging despite correct endpoint in staging Helm values.
+
+**Task:** Fix staging so it connects to the staging RDS instance.
+
+**Action:** Staging Helm values had `SPRING_PROFILES_ACTIVE: "dev"`. The `dev` Spring profile has hardcoded `localhost` in `application-dev.properties` which overrides env vars in Spring Boot 3.x. I changed all Helm values files to use the `docker` profile — designed to read all config from environment variables. The env vars themselves differ per environment through their respective values files.
+
+**Result:** Staging connected to its correct RDS endpoint. One profile (`docker`) works for all containerised environments; env vars handle the differences.
+
+---
+
+### #13 — Redis Env Vars Renamed in Spring Boot 3.x
+
+**Severity:** High | **Category:** Spring Boot 3.x Breaking Changes
+
+#### What Happened
+
+After upgrading the backend from Spring Boot 2.x to 3.x, Redis stopped connecting:
+
+```
+org.springframework.data.redis.RedisConnectionFailureException: Unable to connect to Redis
+Caused by: Unable to connect to localhost:6379
+```
+
+`SPRING_REDIS_HOST` was set correctly in Helm values. But Spring Boot was still trying `localhost:6379`.
+
+#### Root Cause
+
+Spring Boot 3.x renamed all Redis configuration keys:
+
+| Spring Boot 2.x | Spring Boot 3.x |
+|---|---|
+| `SPRING_REDIS_HOST` | `SPRING_DATA_REDIS_HOST` |
+| `SPRING_REDIS_PORT` | `SPRING_DATA_REDIS_PORT` |
+| `SPRING_REDIS_PASSWORD` | `SPRING_DATA_REDIS_PASSWORD` |
+| `SPRING_REDIS_DATABASE` | `SPRING_DATA_REDIS_DATABASE` |
+
+The old `SPRING_REDIS_*` names are silently ignored by Spring Boot 3.x. With old names set and new names not set, Spring Boot uses default values: `localhost:6379`.
+
+#### Exact Fix
+
+Update all Helm values files:
+
+```yaml
+# helm/finbank-backend/values.yaml — Spring Boot 3.x env var names
+env:
+  # Remove old names (SPRING_REDIS_*) and add new names:
+  SPRING_DATA_REDIS_HOST: "finbank-dev-redis.eafcpo.0001.aps1.cache.amazonaws.com"
+  SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_DATABASE: "0"    # dev uses Redis DB 0
 
 # values-staging.yaml
 env:
-  SPRING_PROFILES_ACTIVE: "docker"    # ← NOT "staging", NOT "dev"
-
-# values-prod.yaml
-env:
-  SPRING_PROFILES_ACTIVE: "docker"
+  SPRING_DATA_REDIS_HOST: "finbank-dev-redis.eafcpo.0001.aps1.cache.amazonaws.com"
+  SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_DATABASE: "1"    # staging uses Redis DB 1
 ```
 
-`application-docker.properties` reads from environment variables:
-```properties
-# application-docker.properties — for any containerised environment
-spring.datasource.url=${DATABASE_URL}
-spring.datasource.username=${DATABASE_USERNAME}
-spring.datasource.password=${DATABASE_PASSWORD}
-spring.data.redis.host=${REDIS_HOST}
-```
+#### Interview Answer (STAR Format)
 
-The actual environment-specific values (which database, which Redis) are injected by Helm ConfigMap as separate env vars.
+**Situation:** After upgrading FinBank backend to Spring Boot 3.x, Redis caching broke — "Unable to connect to localhost:6379" despite the correct ElastiCache endpoint being in Helm values.
 
-#### Interview Answer
+**Task:** Restore Redis connectivity without changing the actual Redis infrastructure.
 
-> "Staging was crashing with connection to localhost even though the staging values.yaml had the correct RDS endpoint. The issue was the Spring profile. We had `SPRING_PROFILES_ACTIVE=dev` in staging, which loaded application-dev.properties — hardcoded with localhost values that overrode the environment variables from Kubernetes. The correct approach is to use a 'docker' profile for all containerised environments. The docker profile reads from environment variables, not hardcoded values. The actual environment differences — which database, which Redis — are injected as separate environment variables by the Helm chart."
+**Action:** I confirmed `SPRING_REDIS_HOST` was set but then checked the Spring Boot 3.x migration guide. All Redis env var names changed from `SPRING_REDIS_*` to `SPRING_DATA_REDIS_*`. The old names are ignored in 3.x. I updated all three Helm values files to use the new names.
+
+**Result:** Redis connected immediately after redeployment. I documented this breaking change in the project notes with a before/after table.
 
 ---
 
-### #8 — Redis Env Var Names
+### #14 — BCrypt Hash Prefix Mismatch
 
-**Severity:** High | **Category:** Spring Boot 3.x Compatibility
+**Severity:** High | **Category:** Authentication / Security
 
 #### What Happened
 
-After fixing the Spring profile issue, the backend started but every operation that needed sessions (login, JWT storage, caching) was failing. Logs showed:
+After seeding user accounts into the database, login always returned HTTP 401 — even with the correct password:
 
 ```
-io.lettuce.core.RedisConnectionException:
-  Unable to connect to localhost:6379
+WARN  PasswordEncoder: Password mismatch for user: admin@finbank.com
+Encoded:  $2a$10$vI8aWBnW3fID.ZQ4/zo1G...
+Supplied: $2b$10$someotherhashstring...
 ```
-
-But `REDIS_HOST` was correctly set to the ElastiCache endpoint in the ConfigMap!
 
 #### Root Cause
 
-Spring Boot 3.x changed the property names for Redis configuration:
+BCrypt has two version prefixes: `$2a$` and `$2b$`. They use slightly different algorithms. Comparing a `$2a$` hash using a `$2b$` encoder always fails — even if the original password is correct. The seed data used `$2a$`, but the Spring Security encoder was configured for `$2b$`.
 
-```
-Spring Boot 2.x → spring.redis.host
-Spring Boot 3.x → spring.data.redis.host    ← note: "data" in the middle
-```
+#### How to Diagnose
 
-Correspondingly, the environment variable names changed:
+```bash
+mysql -h finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com \
+  -u finbank_admin -p<YOUR_DB_PASSWORD> finbank_dev_db \
+  -e "SELECT email, LEFT(password_hash, 4) AS prefix FROM users LIMIT 5;"
+# Check if prefix is $2a$ or $2b$
 ```
-Spring Boot 2.x environment variable → SPRING_REDIS_HOST
-Spring Boot 3.x environment variable → SPRING_DATA_REDIS_HOST
-```
-
-The Helm ConfigMap was setting `SPRING_REDIS_HOST` (old format). Spring Boot 3.x ignored it and used the default value: `localhost:6379`.
 
 #### Exact Fix
 
-Update the ConfigMap template in `helm/finbank-backend/templates/configmap.yaml`:
+Configure Spring Security's `BCryptPasswordEncoder` to match the stored hash version:
+
+```java
+@Bean
+public PasswordEncoder passwordEncoder() {
+    // Explicitly use $2a$ version to match seed data
+    return new BCryptPasswordEncoder(BCryptPasswordEncoder.BCryptVersion.$2A);
+}
+```
+
+Or use `DelegatingPasswordEncoder` which handles multiple formats:
+
+```java
+@Bean
+public PasswordEncoder passwordEncoder() {
+    return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    // Accepts {bcrypt}$2a$..., {bcrypt}$2b$..., etc.
+}
+```
+
+#### Interview Answer (STAR Format)
+
+**Situation:** Login always returned 401 in FinBank after seeding user accounts, even with correct passwords.
+
+**Task:** Diagnose why password validation was failing and restore authentication.
+
+**Action:** Logs showed "password mismatch." I checked the stored hashes in the DB — they used `$2a$` BCrypt prefix. Spring Security encoder was comparing using `$2b$` logic. These BCrypt versions are incompatible for comparison. I configured the encoder to explicitly use `$2a$` version. Long-term I switched to `DelegatingPasswordEncoder` which handles multiple BCrypt versions gracefully.
+
+**Result:** Login worked correctly. `DelegatingPasswordEncoder` protects against future hash migration issues.
+
+---
+
+### #15 — Staging Database Cross-Contamination
+
+**Severity:** High | **Category:** Multi-Environment Configuration
+
+#### What Happened
+
+Staging backend was connecting to the dev RDS database. Accounts created in staging appeared in dev, and dev data showed up in staging queries.
+
+```
+# Staging pod log
+[INFO] DataSource URL: jdbc:mysql://...rds.amazonaws.com:3306/finbank_dev_db
+```
+
+The staging values file had the correct staging RDS endpoint but the wrong database name.
+
+#### Root Cause
+
+The staging values file was copied from dev and the `DB_NAME` field was not updated:
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+# values-staging.yaml — BUG
+env:
+  DB_HOST: "finbank-staging-mysql..."    # ← correct host
+  DB_NAME: "finbank_dev_db"              # ← WRONG — should be finbank_staging_db
+```
+
+#### Exact Fix
+
+```yaml
+# helm/finbank-backend/values-staging.yaml — CORRECTED
+env:
+  DB_HOST: "finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com"
+  DB_NAME: "finbank_staging_db"          # ← correct database name
+  SPRING_DATA_REDIS_DATABASE: "1"        # staging uses Redis DB 1
+```
+
+Create the staging database if missing:
+```sql
+CREATE DATABASE IF NOT EXISTS finbank_staging_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+Environment reference table:
+
+| Environment | DB Name | Redis DB |
+|---|---|---|
+| dev | finbank_dev_db | 0 |
+| staging | finbank_staging_db | 1 |
+| prod | finbank_prod_db | 2 |
+
+#### Interview Answer (STAR Format)
+
+**Situation:** FinBank staging was writing data that appeared in dev — both environments shared the same database.
+
+**Task:** Separate staging and dev data stores so environments are fully independent.
+
+**Action:** I checked the staging pod's env vars and found `DB_NAME: finbank_dev_db` — copied from dev and not updated. I corrected it to `finbank_staging_db`, created that database on the staging RDS, and added a reference table in the repo documenting which DB name and Redis database number each environment uses.
+
+**Result:** Environments became fully isolated. The reference table helps future teammates avoid cross-contamination.
+
+---
+
+### #16 — VPC IP Address Exhaustion
+
+**Severity:** Medium | **Category:** Kubernetes Networking, Capacity Planning
+
+#### What Happened
+
+After adding staging environment pods, several staging pods got stuck in `Pending`:
+
+```
+Warning  FailedScheduling  pod/finbank-backend-staging-7d9f4b-xxxxx
+  failed to assign an IP address to container:
+  VPC subnet 'subnet-0a1b2c3d4e5f' has insufficient available IP addresses.
+  Available: 0 / Max: 14
+```
+
+#### Root Cause
+
+AWS EKS VPC CNI gives each pod a real VPC IP address. t3.medium supports 3 ENIs × 6 IPs per ENI = 18 IPs, minus reserved node IPs ≈ 15 pod slots per node. With 2 nodes (30 slots) already consumed by kube-system (~8 pods), ArgoCD (~6), monitoring (~5), and dev pods (~9) = 28 used, there were only 2 free IPs — not enough for staging pods with replicaCount 2.
+
+#### How to Diagnose
+
+```bash
+kubectl describe pod finbank-backend-staging-xxxxx -n finbank-stage | grep -A10 Events
+
+# Check subnet available IPs
+aws ec2 describe-subnets \
+  --filters "Name=tag:Name,Values=finbank-private-*" \
+  --query "Subnets[*].{Subnet:SubnetId,Available:AvailableIpAddressCount}" \
+  --region ap-south-1
+```
+
+#### Exact Fix (Step by Step)
+
+**Immediate — reduce staging replicas:**
+
+```yaml
+# helm/finbank-backend/values-staging.yaml
+replicaCount: 1    # staging doesn't need HA
+```
+
+**Long-term — enable prefix delegation (256 IPs per ENI instead of 6):**
+
+```bash
+kubectl set env daemonset aws-node -n kube-system \
+  ENABLE_PREFIX_DELEGATION=true WARM_PREFIX_TARGET=1
+kubectl rollout restart daemonset/aws-node -n kube-system
+```
+
+#### Interview Answer (STAR Format)
+
+**Situation:** After deploying staging to FinBank EKS cluster, staging pods were stuck in Pending — "insufficient available IP addresses."
+
+**Task:** Get staging pods running without disrupting dev.
+
+**Action:** EKS VPC CNI gives each pod a real VPC IP. t3.medium ≈ 15 pod slots per node. The cluster was nearly full with dev and system pods. Immediate fix: reduce staging replicaCount to 1. Long-term: enabled prefix delegation on the VPC CNI, multiplying IPs per ENI from 6 to 16.
+
+**Result:** Staging pods scheduled immediately. Prefix delegation gave enough headroom for future growth.
+
+---
+
+### #17 — eksctl IRSA Silent Failure
+
+**Severity:** Critical | **Category:** AWS IAM, IRSA, EKS
+
+#### What Happened
+
+After running `eksctl create iamserviceaccount` to set up IRSA for the External Secrets Operator, the command succeeded with no errors. But ESO pods got access denied:
+
+```
+err="AccessDeniedException: User: arn:aws:sts::<YOUR_AWS_ACCOUNT_ID>:assumed-role/eksctl-finbank-XXXX
+is not authorized to perform: secretsmanager:GetSecretValue on resource: finbank/dev/database"
+```
+
+`eksctl` reported success. The IAM role was created. But the role had **zero policies attached**.
+
+#### Root Cause
+
+`eksctl create iamserviceaccount` appeared to succeed but the policy attachment silently failed. The role existed with the correct trust policy (OIDC) but had no permission policies — so pods could assume the role but had no permissions once inside it.
+
+#### How to Diagnose
+
+```bash
+# Check what policies are actually attached to the IRSA role
+ROLE_NAME=$(kubectl get serviceaccount external-secrets -n external-secrets \
+  -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}' | cut -d'/' -f2)
+
+aws iam list-attached-role-policies --role-name $ROLE_NAME
+# If "AttachedPolicies": [] → silent failure confirmed
+```
+
+#### Exact Fix (Step by Step)
+
+Switch to Terraform-managed IRSA — more reliable, auditable, version-controlled:
+
+```bash
+# Step 1: Delete eksctl-created resources
+eksctl delete iamserviceaccount \
+  --name external-secrets --namespace external-secrets \
+  --cluster finbank-dev --region ap-south-1
+
+kubectl delete serviceaccount external-secrets -n external-secrets
+```
+
+```hcl
+# Step 2: Add to Terraform (modules/eks/irsa.tf)
+data "aws_iam_openid_connect_provider" "eks" {
+  url = aws_eks_cluster.finbank.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_role" "external_secrets" {
+  name = "finbank-dev-external-secrets-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Federated = data.aws_iam_openid_connect_provider.eks.arn
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "${replace(data.aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" =
+            "system:serviceaccount:external-secrets:external-secrets"
+          "${replace(data.aws_iam_openid_connect_provider.eks.url, "https://", "")}:aud" =
+            "sts.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "external_secrets" {
+  name = "external-secrets-policy"
+  role = aws_iam_role.external_secrets.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+      Resource = "arn:aws:secretsmanager:ap-south-1:<YOUR_AWS_ACCOUNT_ID>:secret:finbank/*"
+    }]
+  })
+}
+
+resource "kubernetes_service_account" "external_secrets" {
+  metadata {
+    name      = "external-secrets"
+    namespace = "external-secrets"
+    annotations = {
+      "eks.amazonaws.com/role-arn" = aws_iam_role.external_secrets.arn
+    }
+  }
+}
+```
+
+```bash
+# Step 3: Apply and verify
+terraform apply -target=module.eks.aws_iam_role.external_secrets
+kubectl rollout restart deployment/external-secrets -n external-secrets
+
+# Verify policy is attached
+aws iam list-attached-role-policies --role-name finbank-dev-external-secrets-role
+```
+
+#### Prevention
+
+- Always use Terraform for IRSA in Terraform-managed clusters. Never `eksctl create iamserviceaccount`.
+- After any IRSA setup, immediately verify: `aws iam list-attached-role-policies --role-name <role>`. If empty → silent failure.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** `eksctl create iamserviceaccount` appeared to succeed for the FinBank External Secrets Operator, but pods immediately got 403 AccessDeniedException from Secrets Manager.
+
+**Task:** Give ESO the correct IAM permissions to read secrets without hardcoding credentials.
+
+**Action:** I ran `aws iam list-attached-role-policies` on the eksctl-created role and found zero policies attached — a silent failure. I deleted the eksctl resources and moved IRSA to Terraform, which creates the role, attaches the policy, and creates the Kubernetes ServiceAccount annotation atomically. Terraform also gives clear plan and error output — no silent failures.
+
+**Result:** ESO pods fetched secrets successfully. IRSA is now always Terraform-managed in this project.
+
+---
+
+### #18 — PDB Label Mismatch
+
+**Severity:** Medium | **Category:** Kubernetes Reliability
+
+#### What Happened
+
+The PodDisruptionBudget for the backend was deployed but during a node drain, all backend pods were evicted simultaneously — causing a brief outage. The PDB existed but protected nothing.
+
+```bash
+kubectl describe pdb finbank-backend-pdb -n finbank-dev
+# Current Healthy:  0     ← PDB sees ZERO matching pods
+# Total Replicas:   0     ← This is the bug
+# Disruptions Allowed: 2  ← allows ALL pods to be evicted
+```
+
+#### Root Cause
+
+The PDB selector label and the Deployment pod labels did not match:
+
+```yaml
+# PDB selector (what PDB was looking for)
+selector:
+  matchLabels:
+    app.kubernetes.io/name: finbank-backend   # ← long-form label
+
+# Deployment pod template labels (what pods actually had)
+labels:
+  app: finbank-backend                         # ← short-form label
+```
+
+Zero pods matched the PDB. It allowed all disruptions.
+
+#### How to Diagnose
+
+```bash
+# Check what labels pods actually have
+kubectl get pods -n finbank-dev --show-labels | grep finbank-backend
+
+# Check what the PDB selector uses
+kubectl get pdb finbank-backend-pdb -n finbank-dev -o yaml | grep -A5 selector
+
+# They must use the same label KEY
+```
+
+#### Exact Fix
+
+Update the PDB to use the same label key the Deployment sets on pods:
+
+```yaml
+# helm/finbank-backend/templates/pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
 metadata:
-  name: finbank-backend-config
-data:
-  # Spring Boot 3.x Redis — MUST use SPRING_DATA_REDIS_HOST, not SPRING_REDIS_HOST
-  SPRING_DATA_REDIS_HOST: {{ .Values.redis.host | quote }}
-  SPRING_DATA_REDIS_PORT: {{ .Values.redis.port | quote }}
-  SPRING_DATA_REDIS_DATABASE: {{ .Values.redis.database | quote }}
-
-  # Database (unchanged between 2.x and 3.x)
-  SPRING_DATASOURCE_URL: "jdbc:mysql://{{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}"
-  SPRING_DATASOURCE_USERNAME: {{ .Values.database.username | quote }}
+  name: {{ .Release.Name }}-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}    # ← must match Deployment pod labels exactly
 ```
 
-Check the full list of changed Spring Boot 3 env var prefixes:
-- `SPRING_REDIS_*` → `SPRING_DATA_REDIS_*`
-- `SPRING_ELASTICSEARCH_*` → `SPRING_ELASTICSEARCH_URIS` (consolidated)
-- `SPRING_JPA_HIBERNATE_*` → unchanged
+Verify after deploy:
+```bash
+kubectl describe pdb finbank-backend-pdb -n finbank-dev
+# Should show: Current Healthy: 2, Disruptions Allowed: 1
+```
 
-#### Interview Answer
+#### Interview Answer (STAR Format)
 
-> "After fixing the Spring profile, sessions were still failing with Redis connection refused to localhost. The ConfigMap had SPRING_REDIS_HOST set correctly, but the pod was ignoring it. Spring Boot 3.x renamed Redis configuration properties — from spring.redis.host to spring.data.redis.host, adding 'data' in the middle. The corresponding environment variable changed from SPRING_REDIS_HOST to SPRING_DATA_REDIS_HOST. Spring Boot 3 silently ignored the old key and used the default. This is a breaking change when migrating from Spring Boot 2 to 3 that's easy to miss because there's no error — the app starts successfully, but Redis falls back to localhost."
+**Situation:** FinBank backend had a PDB configured for HA, but during a node drain all backend pods were evicted at once. The PDB showed "Disruptions Allowed: 2" — not protecting any pods.
+
+**Task:** Fix the PDB so it correctly limits pod evictions.
+
+**Action:** `kubectl describe pdb` showed "Total Replicas: 0" — the PDB matched zero pods. I compared the PDB's `matchLabels` (`app.kubernetes.io/name: finbank-backend`) against actual pod labels (`app: finbank-backend`). Different keys. I updated the PDB to use the `app` label key that the Deployment actually sets.
+
+**Result:** After fix: "Current Healthy: 2, Disruptions Allowed: 1." The next node drain correctly left one pod running at all times.
 
 ---
 
-### #19 — BCrypt Prefix Mismatch
+### #19 — HPA References Wrong Deployment Name
 
-**Severity:** Medium | **Category:** Security, Spring Boot | **Status:** Deferred
+**Severity:** High | **Category:** Kubernetes Autoscaling
 
 #### What Happened
 
-When testing the production environment, users with accounts created via API (JSON body with password) could log in fine. But users whose passwords were hashed by a Python script during database seeding couldn't log in — Spring Security returned 401 even with the correct password.
+The HPA was deployed via Helm but showed `<unknown>` for metrics and never scaled:
 
-#### Root Cause
+```bash
+kubectl get hpa -n finbank-dev
+# NAME                 REFERENCE              TARGETS       MINPODS  MAXPODS  REPLICAS
+# finbank-backend-hpa  Deployment/finbank     <unknown>/70%    2        5        0
 
-BCrypt has two hash format prefixes:
-- `$2a$` — the universal standard, recognised by all implementations
-- `$2b$` — a newer format from Python's `bcrypt` library, designed to fix a Windows-specific bug
-
-When Python's `bcrypt` library (version 4.x+) hashes a password, it produces `$2b$10$...`. Spring Security's `BCryptPasswordEncoder.matches()` returns `false` for `$2b$` hashes even when the password is correct — it only expects `$2a$`.
-
-```python
-# Python inserts into database
-import bcrypt
-hashed = bcrypt.hashpw("password123".encode(), bcrypt.gensalt())
-# Result: b'$2b$12$...'  ← $2b$ prefix
-
-# Spring Security tries to verify
-# BCryptPasswordEncoder.matches("password123", "$2b$12$...") → FALSE ← BUG
+kubectl describe hpa finbank-backend-hpa -n finbank-dev
+# Warning  FailedGetScale  deployments.apps "finbank" not found
 ```
 
-#### Current Status (Deferred)
-
-Not fixed yet. The database seeding script currently uses Python to hash passwords. Options being evaluated:
-1. Replace `$2b$` with `$2a$` in database after seeding: `UPDATE users SET password = REPLACE(password, '$2b$', '$2a$');`
-2. Seed passwords using Spring's own BCryptPasswordEncoder via a setup endpoint
-3. Use `$2y$` prefix which is also universally accepted
-4. Upgrade Spring Security to a version that handles `$2b$`
-
-#### Interview Answer
-
-> "We have a deferred bug where Python-seeded accounts can't log in. Python's bcrypt library generates hashes with a $2b$ prefix, but Spring Security 6's BCryptPasswordEncoder only accepts $2a$. The prefix represents different BCrypt implementation versions — they're functionally equivalent for passwords, but Spring Security doesn't recognize $2b$. The simplest fix is a one-line SQL update to replace $2b$ with $2a$ after seeding. I deferred it because it only affects test seed data, not real user accounts which are created through the API using Spring's own hasher. This is a good example of why you should generate test data using the same hasher as your production application."
-
----
-
-### #24 — Wrong Spring Profile in Staging
-
-**Severity:** High | **Category:** Spring Boot Configuration (Repeat Pattern of #7)
-
-#### What Happened
-
-Staging environment pods were running but returning incorrect data — the staging API was reading from the dev database (`finsecure_db`) instead of `finbank_staging_db`. No error, no crash. Just wrong data.
-
 #### Root Cause
 
-After multiple environment rebuilds, the `values-staging.yaml` had drifted:
+The HPA template used `{{ .Release.Name }}` for `scaleTargetRef.name`:
 
 ```yaml
-# values-staging.yaml — had been accidentally reverted
-env:
-  SPRING_PROFILES_ACTIVE: "docker"    # ← correct
-  SPRING_DATASOURCE_URL: "jdbc:mysql://{{ .Values.database.host }}/{{ .Values.database.name }}"
-database:
-  name: finsecure_db    # ← WRONG: should be finbank_staging_db
+# hpa.yaml — WRONG
+spec:
+  scaleTargetRef:
+    name: {{ .Release.Name }}    # becomes "finbank" if chart installed with release name "finbank"
 ```
 
-The Spring profile was correct (docker), but the database name variable in the values file pointed to the dev database.
+But the Deployment was named `finbank-backend` (hardcoded in `deployment.yaml`). The HPA looked for `Deployment/finbank` which doesn't exist.
 
 #### Exact Fix
 
-```yaml
-# values-staging.yaml — CORRECT
-database:
-  host: finbank-dev-mysql.c5abc123def.ap-south-1.rds.amazonaws.com
-  port: 3306
-  name: finbank_staging_db   # ← staging database, NOT finsecure_db
-  username: finsecure_user
+Hardcode the deployment name in the HPA to match the actual Deployment:
 
-redis:
-  host: finbank-dev-redis.abc123.ng.0001.aps1.cache.amazonaws.com
-  port: 6379
-  database: 1                # ← Redis DB index 1 for staging (0=dev, 1=staging, 2=prod)
+```yaml
+# helm/finbank-backend/templates/hpa.yaml — CORRECT
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: finbank-backend    # ← hardcoded to match deployment.yaml
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
 ```
 
-#### Interview Answer
+Verify after fix:
+```bash
+kubectl get hpa -n finbank-dev
+# TARGETS column should show: 45%/70% (a real percentage, not <unknown>)
+```
 
-> "Staging pods were running but silently reading from the dev database. No crash, no error — just wrong data. After some investigation, the values-staging.yaml had the correct Spring profile but the database.name variable pointed to finsecure_db (dev) instead of finbank_staging_db. This happened during a rebuild when values files were partially reset. The lesson is to add validation: immediately after deployment, verify the application is using the correct database by checking an endpoint or running a SQL query against both databases and comparing. We now add a post-deployment smoke test that confirms the correct database name from the environment."
+#### Interview Answer (STAR Format)
+
+**Situation:** FinBank backend HPA showed `<unknown>` for CPU targets and never scaled. Warning: "Deployment/finbank not found."
+
+**Task:** Fix the HPA so it correctly monitors the backend Deployment and scales pods under load.
+
+**Action:** `kubectl describe hpa` showed it trying to scale `Deployment/finbank` — the Helm release name. The actual Deployment was named `finbank-backend` (hardcoded in `deployment.yaml`). The HPA template used `{{ .Release.Name }}` which resolved to just "finbank." I hardcoded `finbank-backend` in the HPA template to match the Deployment.
+
+**Result:** HPA started monitoring the correct Deployment. During a load test it correctly scaled from 2 to 4 pods and back down after load subsided.
 
 ---
 
@@ -813,305 +1772,368 @@ redis:
 
 ---
 
-### #9 — Terraform Destroy Blocked by ELB
+### #20 — Terraform Destroy Fails: ELB Dependency
 
-**Severity:** High | **Category:** Terraform, AWS Networking
+**Severity:** High | **Category:** Terraform State, AWS Infrastructure
 
 #### What Happened
 
-Running `terraform destroy` to clean up the environment failed after partially destroying resources:
+`terraform destroy` failed after deleting many resources but got stuck on VPC deletion:
 
 ```
-Error: error deleting Security Group (sg-0abc123): 
-  DependencyViolation: resource sg-0abc123def has a dependent object
-  There are active load balancers using this security group.
+Error: error deleting VPC (vpc-0a1b2c3d4e5f67890): DependencyViolation:
+  The vpc 'vpc-0a1b2c3d4e5f67890' has dependencies and cannot be deleted.
 ```
-
-Terraform deleted the EKS nodes, some IAM roles, but got stuck on VPC-related resources because an ELB was still present.
 
 #### Root Cause
 
-When you apply an Ingress YAML in Kubernetes with `kubernetes.io/ingress.class: alb`, the AWS Load Balancer Controller creates a real Application Load Balancer in AWS on your behalf. This ALB:
-- Exists in your VPC
-- Has a security group attached to it
-- Is **not tracked by Terraform state** (Kubernetes created it, not Terraform)
+The AWS ALB was created by the **Kubernetes ALB Ingress Controller** — not by Terraform. Terraform's state has no record of this ALB. When Terraform tried to delete the VPC, AWS rejected it because the ALB still existed inside that VPC.
 
-When Terraform tries to destroy the VPC, AWS refuses because the ALB security group is still attached to the VPC. Terraform doesn't know the ALB exists.
-
-#### Exact Fix
-
-**ALWAYS delete Kubernetes Ingress resources BEFORE running terraform destroy:**
+#### How to Diagnose
 
 ```bash
-# Step 1: Delete all Ingress objects — this tells ALB Controller to delete the ALBs
+VPC_ID="vpc-0a1b2c3d4e5f67890"
+
+# Find ALBs in the VPC
+aws elbv2 describe-load-balancers \
+  --query "LoadBalancers[?VpcId=='$VPC_ID'].[LoadBalancerName,LoadBalancerArn]" \
+  --region ap-south-1
+```
+
+#### Exact Fix (Step by Step)
+
+**Step 1: Delete Kubernetes Ingress resources BEFORE terraform destroy**
+
+```bash
 kubectl delete ingress --all -n finbank-dev
 kubectl delete ingress --all -n finbank-stage
 kubectl delete ingress --all -n finbank-prod
 
-# Step 2: WAIT — verify ALBs are actually deleted from AWS (takes 1-2 minutes)
-aws elbv2 describe-load-balancers \
-  --region ap-south-1 \
-  --no-cli-pager \
-  --query 'LoadBalancers[*].{Name:LoadBalancerName,State:State.Code}'
-
-# Wait until result is: []
-
-# Step 3: ONLY THEN run terraform destroy
-terraform destroy -var-file=environments/dev/terraform.tfvars -auto-approve
+# Wait for ALBs to be removed by the Ingress Controller
+aws elbv2 describe-load-balancers --region ap-south-1
+# Wait until no finbank ALBs appear
 ```
 
-If you forget and terraform destroy is already stuck, manually delete the ALBs:
+**Step 2: Now run terraform destroy**
+
 ```bash
-# Get ALB ARNs
-aws elbv2 describe-load-balancers --region ap-south-1 --query 'LoadBalancers[*].LoadBalancerArn'
-
-# Delete each ALB
-aws elbv2 delete-load-balancer --load-balancer-arn <ARN>
-
-# Also delete the ALB security group
-aws ec2 delete-security-group --group-id sg-0abc123def
+terraform destroy -auto-approve
 ```
 
-#### Interview Answer
+**Step 3: If ALBs remain, delete manually**
 
-> "Terraform destroy failed with DependencyViolation on VPC resources. The issue was that I had active Application Load Balancers in the VPC that were not managed by Terraform — they were created by the Kubernetes ALB Controller when I applied Ingress objects. Terraform had no knowledge of them. AWS refused to delete VPC subnets and security groups while the ALBs existed. The fix and now the first step in our teardown checklist: delete all Kubernetes Ingress resources first, wait for ALBs to disappear from AWS console, then run terraform destroy. This taught me that 'what Terraform manages' and 'what exists in AWS' can be different things when external controllers create resources."
+```bash
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+  --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+  --output text --region ap-south-1)
+aws elbv2 delete-load-balancer --load-balancer-arn $ALB_ARN --region ap-south-1
+terraform destroy -auto-approve
+```
+
+#### Interview Answer (STAR Format)
+
+**Situation:** `terraform destroy` on FinBank infrastructure failed at VPC deletion with "DependencyViolation."
+
+**Task:** Identify the blocking resource and clean it up.
+
+**Action:** Listed all resources in the VPC with AWS CLI and found an ALB that Terraform didn't know about — created by the Kubernetes ALB Ingress Controller. I deleted the Kubernetes Ingress objects first, which triggered the Ingress Controller to remove the ALB from AWS. Then `terraform destroy` completed.
+
+**Result:** Full infrastructure teardown succeeded. I added a teardown checklist: always delete Kubernetes Ingress resources before `terraform destroy`.
 
 ---
 
-### #10 — Orphaned ELB Security Group
+### #21 — Orphaned ELB Security Group
 
-**Severity:** Medium | **Category:** AWS Networking Cleanup
+**Severity:** Medium | **Category:** AWS VPC Cleanup
 
 #### What Happened
 
-Even after deleting Ingress objects and waiting for ALBs to disappear, `terraform destroy` still failed on VPC deletion with a security group dependency error.
+After deleting the ALBs (#20), `terraform destroy` failed again on security group deletion:
+
+```
+Error: error deleting Security Group (sg-0abc123def456): DependencyViolation:
+  resource sg-0abc123def456 has a dependent object
+```
+
+The ALB was gone but its security group remained as an orphan.
 
 #### Root Cause
 
-The Classic ELB (if any existed) or the ALB leaves behind an orphaned security group even after the load balancer is deleted. AWS deletes the load balancer but the security group's deletion is eventually consistent — it might not be immediately deleted, or there's a separate ALB-managed security group that AWS doesn't auto-clean.
+When the ALB Ingress Controller creates an ALB, it also creates a security group. When the ALB is deleted, the security group is **not automatically deleted**. Terraform doesn't know about it. When Terraform tries to delete the VPC's security groups, cross-references to the orphan block deletion.
 
 #### Exact Fix
 
-Manually find and delete the orphaned security group before terraform destroy:
-
 ```bash
-# Find security groups in the VPC that are NOT default
-VPC_ID=$(terraform output -raw vpc_id)
+VPC_ID="vpc-0a1b2c3d4e5f67890"
 
-aws ec2 describe-security-groups \
+# Find orphaned SGs created by ALB Ingress Controller (prefixed k8s-)
+ORPHAN_SGS=$(aws ec2 describe-security-groups \
   --filters "Name=vpc-id,Values=$VPC_ID" \
-  --query 'SecurityGroups[?GroupName!=`default`].{Name:GroupName,ID:GroupId}' \
-  --output table
+  --query "SecurityGroups[?starts_with(GroupName,'k8s-')].GroupId" \
+  --output text --region ap-south-1)
 
-# For any unexpected SGs related to the ALB:
-aws ec2 delete-security-group --group-id sg-0abc123def
+# Remove rules referencing each orphan from other SGs
+for SG_ID in $ORPHAN_SGS; do
+  REFS=$(aws ec2 describe-security-groups \
+    --filters "Name=ip-permission.group-id,Values=$SG_ID" \
+    --query "SecurityGroups[*].GroupId" \
+    --output text --region ap-south-1)
+  for REF_SG in $REFS; do
+    aws ec2 revoke-security-group-ingress \
+      --group-id $REF_SG --source-group $SG_ID \
+      --region ap-south-1 || true
+  done
+  aws ec2 delete-security-group --group-id $SG_ID --region ap-south-1
+done
 
-# Now retry terraform destroy
-terraform destroy -var-file=environments/dev/terraform.tfvars -auto-approve
+terraform destroy -auto-approve
 ```
 
-#### Interview Answer
+#### Interview Answer (STAR Format)
 
-> "After deleting ALBs, terraform destroy still failed on a security group. AWS had left behind an orphaned security group from the ALB creation — even after the load balancer itself was gone, AWS didn't immediately clean up the associated security group. I found it with describe-security-groups filtered to our VPC, deleted it manually, then terraform destroy completed. This showed me that AWS cleanup is not always atomic — some resources are cleaned up asynchronously, so add a brief wait after ALB deletion before running terraform destroy."
+**Situation:** After deleting ALBs, `terraform destroy` failed again on a security group — orphaned by the ALB Ingress Controller.
+
+**Task:** Remove the orphaned security group so Terraform could delete the VPC.
+
+**Action:** Found SGs with `k8s-` name prefix (ALB Ingress Controller naming convention). Removed all cross-references to the orphan in other SGs, then deleted the orphan. Terraform destroy completed.
+
+**Result:** Full VPC deletion succeeded. Added orphaned SG cleanup to the teardown runbook.
 
 ---
 
-### #11 — Terraform State Lock
+### #22 — Terraform State File Locked
 
 **Severity:** High | **Category:** Terraform State Management
 
 #### What Happened
 
-After a terraform apply was interrupted (Ctrl+C or Jenkins timeout), the next terraform apply or terraform plan showed:
+Every `terraform plan` or `terraform apply` failed:
 
 ```
-Error: Error acquiring the state lock
-
+Error: Error locking state: Error acquiring the state lock: ConditionalCheckFailedException:
   Lock Info:
-    ID:        abc123de-f456-7890-abcd-ef1234567890
-    Path:      finbank/dev/terraform.tfstate
-    Operation: OperationTypeApply
-    Who:       anshu@Mac.local
-    Version:   1.6.6
-    Created:   2024-12-09 14:23:11.456789 +0000 UTC
-    Info:
-
-Terraform acquires a state lock to protect the state from being written by
-multiple users at the same time. Please resolve the issue above and try again.
+    ID:        a1b2c3d4-e5f6-7890-abcd-ef1234567890
+    Who:       jenkins@jenkins-container
+    Created:   2026-03-15 09:45:22 UTC
 ```
 
 #### Root Cause
 
-When Terraform runs, it acquires a lock in DynamoDB (`finbank-terraform-locks` table) to prevent concurrent runs. When the operation was interrupted, the lock was never released. DynamoDB still shows the lock as active even though no Terraform process is running.
+Terraform uses DynamoDB to lock the state file during operations. A previous Jenkins pipeline run was killed mid-apply (Jenkins container restarted). The lock was never released. The DynamoDB entry remains indefinitely.
 
 #### Exact Fix
 
 ```bash
-# Copy the Lock ID from the error message
-# Then force-unlock (the -force flag skips the "are you sure?" prompt)
-terraform force-unlock -force abc123de-f456-7890-abcd-ef1234567890
+# Step 1: Confirm no one is actively running Terraform
+# (Check with team + check Jenkins active builds)
 
-# Verify lock is released
-terraform plan  # should succeed now
+# Step 2: Force-unlock with the Lock ID from the error message
+terraform force-unlock a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+# Step 3: Verify state is intact
+terraform state list
+terraform plan
 ```
 
-**Safety check before force-unlocking:** Make sure NO other Terraform process is actually running. If two people are running terraform simultaneously and you force-unlock one, you create a split-brain state. Only unlock when you're certain it's a stale lock from an interrupted process.
+Or delete from DynamoDB directly:
+```bash
+aws dynamodb delete-item \
+  --table-name finbank-terraform-locks \
+  --key '{"LockID": {"S": "finbank-terraform-state-<YOUR_AWS_ACCOUNT_ID>/finbank/terraform.tfstate"}}' \
+  --region ap-south-1
+```
 
-#### Interview Answer
+#### Interview Answer (STAR Format)
 
-> "After a Jenkins pipeline timeout during terraform apply, subsequent runs showed 'Error acquiring the state lock'. Terraform uses DynamoDB to implement distributed locking — when a run starts, it writes a lock record; when it finishes, it deletes it. An interrupted run leaves the lock behind. The fix is terraform force-unlock with the Lock ID from the error message. I always verify there's genuinely no other Terraform process running before force-unlocking, because force-unlocking a legitimate lock could allow two concurrent state modifications — which corrupts the state file."
+**Situation:** After a Jenkins container restart during a Terraform apply on FinBank, all subsequent Terraform commands failed with "state locked."
+
+**Task:** Release the stale lock so Terraform operations could resume.
+
+**Action:** Confirmed no active Terraform process was running. The lock was stale from the killed process. I ran `terraform force-unlock` with the Lock ID from the error message, then ran `terraform state list` to verify the state file was intact, then `terraform plan` to confirm accurate infrastructure state.
+
+**Result:** Lock released, operations resumed. Added a rule: never restart the Jenkins container while a Terraform stage is running.
 
 ---
 
-### #12 — Terraform Variable Conflict
+### #23 — Variable Specified Twice
 
-**Severity:** Medium | **Category:** Terraform Variable Handling
+**Severity:** Low | **Category:** Terraform CLI
 
 #### What Happened
 
-Running terraform apply with both `-var` flags and `TF_VAR_` environment variables produced:
+`terraform apply` in Jenkins failed:
 
 ```
-Error: Variable specified twice
-
-  on command-line
-  in environment variable
-
-The variable "db_password" was provided twice. Please provide each
-variable only once.
+Error: Duplicate value for variable "db_password"
+  A value for var.db_password was already set using a -var flag.
+  Variables may not be set by multiple mechanisms in a single plan/apply.
 ```
 
 #### Root Cause
 
-Terraform detects if you specify the same variable through multiple mechanisms and treats it as an error. You cannot mix `-var 'db_password=xxx'` and `TF_VAR_db_password=xxx` for the same variable.
+`db_password` was set both in `terraform.tfvars` AND as a `-var` flag in the Jenkinsfile. Terraform rejects this as ambiguous.
 
 #### Exact Fix
 
-Pick ONE method and use it exclusively. Always use environment variables (they're more secure — not visible in process list or shell history):
+Remove from `terraform.tfvars`, pass secrets only via environment variable:
 
 ```bash
-# WRONG — mixing mechanisms
-export TF_VAR_db_password='<YOUR_DB_PASSWORD>'
-terraform apply -var='db_password=<YOUR_DB_PASSWORD>'  # ERROR: specified twice
-
-# CORRECT — use only env vars
-export TF_VAR_db_password='<YOUR_DB_PASSWORD>'
-export TF_VAR_jwt_secret='<YOUR_JWT_SECRET>'
-terraform apply -var-file=environments/dev/terraform.tfvars -auto-approve
+# In Jenkins pipeline environment block:
+export TF_VAR_db_password="${DB_PASSWORD}"    # Terraform reads TF_VAR_* automatically
+terraform apply -var-file="terraform.tfvars"  # no -var flag needed for db_password
 ```
 
-The `-var-file` flag is fine to use alongside `TF_VAR_` because it reads from a file, not command line. Just don't put sensitive values in the `.tfvars` file.
+#### Interview Answer (STAR Format)
 
-#### Interview Answer
+**Situation:** Jenkins Terraform pipeline failed with "variable specified twice" for `db_password`.
 
-> "Terraform threw 'Variable specified twice' during apply. I had the same variable set as both a TF_VAR_ environment variable and a -var command line argument — a copy-paste mistake from switching between two methods. Terraform catches this as an error to prevent ambiguity about which value takes precedence. The fix is to pick one mechanism. I now always use TF_VAR_ environment variables for sensitive values because they're not visible in shell history or process lists, unlike -var flags."
+**Task:** Fix the configuration so Terraform accepted the variable without conflict.
+
+**Action:** Found `db_password` set in both `terraform.tfvars` and as a `-var` flag in Jenkinsfile. Removed it from tfvars and switched to `TF_VAR_db_password` env var in Jenkins credentials — Terraform reads it automatically, no `-var` flag needed, no conflict.
+
+**Result:** Terraform apply ran without variable conflicts. Sensitive values now live only in Jenkins credentials.
 
 ---
 
-### #20 — Zsh Bracket Expansion in Terraform
+### #24 — Staging Database Missing After Rebuild
 
-**Severity:** Medium | **Category:** Shell Compatibility
-
-#### What Happened
-
-On Mac with zsh as the default shell, running terraform with inline variables using curly braces caused strange errors:
-
-```bash
-terraform apply -var='{"db_password": "<YOUR_DB_PASSWORD>"}'
-# zsh: no matches found: {"db_password": "<YOUR_DB_PASSWORD>"}
-```
-
-#### Root Cause
-
-Zsh treats curly braces `{}` as glob expansion operators. When you type `{db_password: ...}`, zsh tries to expand it as a file glob and fails when no matching files are found.
-
-Bash (Linux default) does not treat `{}` as globs in this context — it would work fine. Mac uses zsh by default since macOS Catalina.
-
-#### Exact Fix
-
-Don't use curly brace syntax for Terraform variables. Use `TF_VAR_` environment variables:
-
-```bash
-# WRONG — zsh mangles curly braces
-terraform apply -var='{"db_password": "<YOUR_DB_PASSWORD>"}'
-
-# ALSO WRONG — zsh-specific quoting issues
-terraform plan -var '{db_password=<YOUR_DB_PASSWORD>}'
-
-# CORRECT — plain string format, no curly braces
-terraform apply -var='db_password=<YOUR_DB_PASSWORD>'
-
-# BEST — use environment variables, no -var flag at all
-export TF_VAR_db_password='<YOUR_DB_PASSWORD>'
-terraform apply -var-file=environments/dev/terraform.tfvars -auto-approve
-```
-
-#### Interview Answer
-
-> "Running Terraform on Mac with zsh produced 'no matches found' errors for variables that used curly braces. Zsh treats curly braces as glob patterns, trying to expand them as filesystem wildcards. Bash doesn't do this, so the same command works on Linux CI/CD but fails on Mac. The fix was to stop using curly brace syntax in -var flags — either use simple 'key=value' format or, better, switch entirely to TF_VAR_ environment variables which avoids the shell-specific parsing issue altogether."
-
----
-
-### #23 — Staging Database Missing After Every Rebuild
-
-**Severity:** High | **Category:** Database Management, Terraform
+**Severity:** High | **Category:** Multi-Environment Terraform
 
 #### What Happened
 
-After every `terraform destroy` + `terraform apply` cycle, the staging environment pods would crash because `finbank_staging_db` didn't exist in the rebuilt RDS instance. Had to manually connect to RDS and run `CREATE DATABASE` every time.
+Every infrastructure rebuild (`terraform destroy && apply`) caused staging backend to fail:
+
+```
+Unknown database 'finbank_staging_db'
+java.sql.SQLException: Unknown database 'finbank_staging_db'
+```
+
+Dev database always existed. Staging had to be manually created after every rebuild.
 
 #### Root Cause
 
-Terraform's RDS module creates the RDS server with one initial database (`finsecure_db` as specified in `var.db_name`). There's no Terraform resource type to create additional MySQL databases within an existing RDS instance. So after every rebuild, only `finsecure_db` existed.
+Terraform only created `finbank_dev_db`. The staging database (`finbank_staging_db`) was originally created manually and was never added to Terraform state. Every rebuild starts fresh — only what's in Terraform gets created.
 
 #### Exact Fix
 
-Added a `null_resource` to `databases.tf` that automatically creates the additional databases after Terraform provisions the infrastructure. It does this by running a temporary MySQL client pod inside EKS:
+Add staging DB creation to Terraform:
 
 ```hcl
-# databases.tf
-resource "null_resource" "create_databases" {
-  triggers = {
-    rds_host = module.rds.db_host  # re-runs whenever RDS endpoint changes
-  }
-  depends_on = [module.rds, module.eks]
+# modules/rds/main.tf
+resource "null_resource" "create_staging_db" {
+  depends_on = [aws_db_instance.finbank]
 
   provisioner "local-exec" {
-    command = <<-EOF
-      sleep 90
-      aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}
-
-      kubectl run db-init \
-        --image=mysql:8.0 \
-        --restart=Never \
-        -n default -- sleep 120
-
-      kubectl wait pod/db-init --for=condition=Ready \
-        --timeout=120s -n default
-
-      kubectl exec db-init -n default -- mysql \
-        -h ${module.rds.db_host} \
+    command = <<-EOT
+      mysql -h ${aws_db_instance.finbank.address} \
         -u ${var.db_username} \
         -p${var.db_password} \
         -e "CREATE DATABASE IF NOT EXISTS finbank_staging_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    EOT
+  }
 
-      kubectl exec db-init -n default -- mysql \
-        -h ${module.rds.db_host} \
-        -u ${var.db_username} \
-        -p${var.db_password} \
-        -e "CREATE DATABASE IF NOT EXISTS finbank_prod_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-
-      kubectl delete pod db-init -n default
-    EOF
+  triggers = {
+    rds_endpoint = aws_db_instance.finbank.endpoint
   }
 }
 ```
 
-This approach uses EKS pods as the MySQL client because the RDS instance is in private subnets — it's not reachable from your Mac directly. The pod runs inside the same VPC and can reach RDS.
+#### Interview Answer (STAR Format)
 
-#### Interview Answer
+**Situation:** Every FinBank infrastructure rebuild left the staging database missing, causing staging backend to crash on every fresh deploy.
 
-> "Every rebuild required manually creating the staging and prod databases — Terraform's RDS resource only creates the initial database. I automated this with a Terraform null_resource that launches a temporary MySQL client pod inside EKS, executes CREATE DATABASE IF NOT EXISTS statements for all three databases, then self-destructs. The IF NOT EXISTS means it's idempotent — safe to run multiple times. The pod runs inside EKS because RDS is in private subnets unreachable from outside the VPC. This eliminated a manual step that blocked every rebuild for 10 minutes."
+**Task:** Ensure the staging database is always created automatically as part of Terraform apply.
+
+**Action:** The staging database was originally created manually, never in Terraform. I added a `null_resource` with a `local-exec` provisioner that runs `CREATE DATABASE IF NOT EXISTS finbank_staging_db` after the RDS instance is ready. The `IF NOT EXISTS` makes it idempotent.
+
+**Result:** Both dev and staging databases are now created automatically after every `terraform apply`. No more manual steps in the rebuild process.
+
+---
+
+### #25 — Double Port in JDBC URL
+
+**Severity:** High | **Category:** Terraform Outputs, Spring Boot Configuration
+
+#### What Happened
+
+After using a Terraform output value to build the database connection string, the backend failed:
+
+```
+Caused by: java.net.UnknownHostException:
+  finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com:3306
+  (No such host: finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com:3306)
+```
+
+The actual JDBC URL being used:
+```
+jdbc:mysql://finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com:3306:3306/finbank_dev_db
+```
+
+Two `:3306` in the URL.
+
+#### Root Cause
+
+Terraform has two different RDS output variables:
+
+```hcl
+output "db_endpoint" {
+  value = aws_db_instance.finbank.endpoint
+  # = "finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com:3306"
+  # ↑ includes the port
+}
+
+output "db_host" {
+  value = aws_db_instance.finbank.address
+  # = "finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com"
+  # ↑ hostname only, no port
+}
+```
+
+The Helm values used `db_endpoint` (hostname:3306), and the JDBC URL template also appended `:3306` — resulting in `:3306:3306`.
+
+#### How to Diagnose
+
+```bash
+terraform output db_endpoint
+# finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com:3306   ← includes port
+
+terraform output db_host
+# finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com         ← hostname only
+
+kubectl exec -it deployment/finbank-backend -n finbank-dev -- env | grep DB_HOST
+# If it shows hostname:3306 — that's the bug
+```
+
+#### Exact Fix
+
+Use `db_host` (the `address` attribute) when the port is set separately:
+
+```bash
+DB_HOST=$(terraform output -raw db_host)
+# Output: finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com
+
+sed -i "s|DB_HOST:.*|DB_HOST: \"${DB_HOST}\"|" helm/finbank-backend/values.yaml
+```
+
+Result:
+```
+jdbc:mysql://finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com:3306/finbank_dev_db  ✓
+```
+
+#### Prevention
+
+- Name Terraform outputs clearly: `db_host_with_port` vs `db_host_only`.
+- Never use `endpoint` output when the port is being appended separately in the URL template.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** After using a Terraform output for the FinBank database connection, the backend failed with "No such host: hostname:3306" — the port was being treated as part of the hostname.
+
+**Task:** Fix the JDBC URL so the database connection worked.
+
+**Action:** I printed the JDBC URL from the pod's environment and found `hostname:3306:3306/db` — port appeared twice. Terraform's `db_endpoint` output includes `:3306`; `db_host` is hostname only. I switched to `db_host` everywhere the hostname is used separately from port.
+
+**Result:** JDBC URL became well-formed and backend connected to RDS successfully. Renamed Terraform outputs to `db_host_with_port` and `db_host_only` for future clarity.
 
 ---
 
@@ -1119,445 +2141,830 @@ This approach uses EKS pods as the MySQL client because the RDS instance is in p
 
 ---
 
-### #13 — ALB Missing IAM Permission
+### #26 — ALB Health Checks Fail: Missing IAM Policy
 
-**Severity:** High | **Category:** ALB Controller, IAM
+**Severity:** Critical | **Category:** AWS IAM, ALB Ingress Controller
 
 #### What Happened
 
-After installing the ALB Controller and applying Ingress YAMLs, the ALB was created in AWS (visible in EC2 console) but all targets showed as "unhealthy" in the target group. Pods were running. Services were correct. But the ALB couldn't route traffic to any pods.
-
-ALB Controller logs showed:
+After deploying the AWS Load Balancer Controller and creating Ingress resources, the ALB was created but all health checks were failing:
 
 ```
-{"level":"error","msg":"Error reconciling ingress",
- "error":"failed to reconcile listeners: failed to ModifyListener:
-  AccessDeniedException: User arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:assumed-role/AWSLoadBalancerControllerRole
-  is not authorized to perform: elasticloadbalancing:DescribeListenerAttributes
-  on resource: arn:aws:elasticloadbalancing:ap-south-1:..."}
+Warning  FailedDeployModel  reconcile error:
+  operation error Elastic Load Balancing v2: CreateTargetGroup,
+  AccessDeniedException: User is not authorized to perform: elasticloadbalancing:CreateTargetGroup
 ```
 
 #### Root Cause
 
-The official AWS Load Balancer Controller IAM policy JSON (downloaded from the GitHub repo) is missing `elasticloadbalancing:DescribeListenerAttributes` and `elasticloadbalancing:ModifyListenerAttributes` permissions. These were added to the ALB Controller in a recent version but the policy document wasn't updated.
+The AWS Load Balancer Controller requires a specific IAM policy with 50+ permissions to manage ALBs, target groups, security groups, and listeners. The IRSA role was created but the official policy was not attached — either missing or only partially applied.
 
-Without these permissions, the controller cannot configure the ALB listener attributes (like access logging, idle timeout), causing the reconciliation to fail.
-
-#### Exact Fix
-
-Add an inline policy with the missing permissions to the ALB Controller IAM role:
+#### How to Diagnose
 
 ```bash
-# Add inline policy with missing permissions
-aws iam put-role-policy \
-  --role-name AWSLoadBalancerControllerRole \
-  --policy-name ALBControllerExtraPermissions \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": [
-          "elasticloadbalancing:DescribeListenerAttributes",
-          "elasticloadbalancing:ModifyListenerAttributes"
-        ],
-        "Resource": "*"
-      }
-    ]
-  }'
+# Check controller logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller | grep -i error
 
-# Restart ALB Controller to pick up the new permissions
-kubectl rollout restart deployment aws-load-balancer-controller -n kube-system
-
-# Verify: delete and re-create the ingress to force reconciliation
-kubectl delete ingress finbank-ingress -n finbank-dev
-kubectl apply -f helm/finbank-ingress-dev.yaml
+# Check what policies are attached to the IRSA role
+ROLE_NAME=$(kubectl get sa aws-load-balancer-controller -n kube-system \
+  -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}' | cut -d'/' -f2)
+aws iam list-attached-role-policies --role-name $ROLE_NAME
 ```
 
-#### Interview Answer
+#### Exact Fix (Step by Step)
 
-> "ALB was being created but all targets were unhealthy. Checking ALB Controller logs revealed an AccessDeniedException — DescribeListenerAttributes was not allowed. The official ALB Controller IAM policy on GitHub was missing two permissions that a recent controller version started requiring. This is a common trap: official documentation and policy documents can lag behind code changes. I added an inline policy with the two missing actions and restarted the controller. The lesson: when AWS controllers report permission errors, always check the controller logs directly — the IAM error messages from AWS are specific about exactly which action is missing."
+```bash
+# Step 1: Download the official policy
+curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.7.2/docs/install/iam_policy.json
+
+# Step 2: Create the policy
+aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file://iam_policy.json \
+  --region ap-south-1
+
+# Step 3: Attach to IRSA role
+aws iam attach-role-policy \
+  --role-name finbank-dev-alb-controller-role \
+  --policy-arn arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:policy/AWSLoadBalancerControllerIAMPolicy
+
+# Step 4: Restart controller
+kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
+```
+
+#### Prevention
+
+- Manage the ALB Controller IAM policy in Terraform using the official policy JSON.
+- After every EKS rebuild, verify policy attachment before deploying any Ingress resources.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** FinBank ALB was provisioned but all target group health checks failed. Controller logs showed AccessDeniedException for `CreateTargetGroup`.
+
+**Task:** Give the Load Balancer Controller the permissions it needs to fully manage ALBs.
+
+**Action:** Checked the IRSA role — the official ALB Controller policy was not attached. Downloaded the official policy JSON from kubernetes-sigs GitHub, created it in IAM, attached it to the IRSA role. After restarting the controller, it completed the ALB, listener, and target group setup.
+
+**Result:** ALB health checks went green and traffic started reaching pods. IAM policy creation moved into Terraform module for automatic provisioning on every rebuild.
 
 ---
 
-### #14 — Wrong Ingress Path
+### #27 — Backend Ingress Routes to Wrong Path
 
-**Severity:** High | **Category:** Ingress Configuration, Spring Boot
+**Severity:** High | **Category:** Kubernetes Ingress, ALB Configuration
 
 #### What Happened
 
-Frontend and analytics were accessible via the ALB. But every API call to the backend returned 404 Not Found, even though the backend pod was healthy and responding correctly when accessed directly via port-forward.
+After ALB was working, API calls to `/api/v1/users` returned 404 through the ALB even though the backend pod responded correctly when called directly inside the cluster:
+
+```bash
+# Direct pod call — WORKS
+kubectl exec -it deployment/finbank-frontend -n finbank-dev -- \
+  curl http://finbank-backend:8080/api/v1/users
+# Returns: [{"id":1,"name":"Test User"}]
+
+# Through ALB — FAILS
+curl https://finbank-alb-123456789.ap-south-1.elb.amazonaws.com/api/v1/users
+# Returns: 404 Not Found
+```
 
 #### Root Cause
 
-The Ingress was routing `/api` to the backend service, but Spring Boot's context path is `/api/v1`. All backend endpoints start with `/api/v1/something`. The path `/api` matched Ingress rule and got routed to backend, but Spring Boot returned 404 because it had no handler for `/api` — only for `/api/v1/...`.
+The Ingress used `pathType: Exact` for `/api/v1/*`. Exact path type means the URL must literally equal `/api/v1/*` — not `/api/v1/users`. Only the literal string `/api/v1/*` (with an asterisk) would match. No real request would ever match this.
 
 ```yaml
 # WRONG
-- path: /api           # ← routes to backend
-  pathType: Prefix     #    but backend has no /api endpoints
-                       #    Spring Boot: 404 for /api/accounts
-                       #    Spring Boot: 200 for /api/v1/accounts
-
-# CORRECT
-- path: /api/v1        # ← routes /api/v1/* to backend
-  pathType: Prefix     #    Spring Boot: 200 for /api/v1/accounts ✓
+- path: /api/v1/*
+  pathType: Exact    # literal string match only
 ```
 
 #### Exact Fix
 
-Update the Ingress routing rule for backend from `/api` to `/api/v1`:
-
 ```yaml
+# helm/finbank-backend/templates/ingress.yaml — CORRECT
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: finbank-ingress
+  namespace: finbank-dev
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
 spec:
   rules:
-    - http:
-        paths:
-          - path: /api/analytics   # analytics service (priority 1)
-            pathType: Prefix
-            backend:
-              service:
-                name: finbank-analytics
-                port:
-                  number: 80
-          - path: /api/v1          # backend service (priority 2)
-            pathType: Prefix
-            backend:
-              service:
-                name: finbank-backend
-                port:
-                  number: 80
-          - path: /                # frontend (catch-all)
-            pathType: Prefix
-            backend:
-              service:
-                name: finbank-frontend
-                port:
-                  number: 80
+  - http:
+      paths:
+      - path: /api/v1
+        pathType: Prefix      # ← matches /api/v1 AND /api/v1/anything
+        backend:
+          service:
+            name: finbank-backend
+            port:
+              number: 8080
+      - path: /api/analytics
+        pathType: Prefix
+        backend:
+          service:
+            name: finbank-analytics
+            port:
+              number: 8000
+      - path: /
+        pathType: Prefix      # ← catch-all for frontend, MUST be last
+        backend:
+          service:
+            name: finbank-frontend
+            port:
+              number: 80
 ```
 
-**Rule ordering matters:** `/api/analytics` must come before `/api/v1` or both paths starting with `/api` would route to backend.
+More specific paths (`/api/v1`, `/api/analytics`) must come before the catch-all (`/`). ALB evaluates top-to-bottom and uses the first match.
 
-#### Interview Answer
+#### Interview Answer (STAR Format)
 
-> "Backend returned 404 via ALB but worked fine with port-forward. The Ingress had `/api` as the path prefix for backend routing. But Spring Boot's application.properties sets server.servlet.context-path=/api/v1 — every endpoint starts with /api/v1, nothing exists at /api. The request reached the correct pod but Spring Boot had no handler. Changing the Ingress path to /api/v1 fixed it. This highlighted the importance of knowing your application's actual URL structure before configuring Ingress rules."
+**Situation:** FinBank ALB was running but API calls to `/api/v1/users` returned 404 through it while direct pod-to-pod calls worked.
+
+**Task:** Fix Ingress routing so `/api/v1/*` correctly reaches the backend service.
+
+**Action:** Checked Ingress config and found `pathType: Exact` on `/api/v1/*`. Exact path type requires literal URL match — no real request would ever send `/api/v1/*`. Changed all paths to `pathType: Prefix` and reordered so `/api/v1` and `/api/analytics` come before the frontend catch-all `/`.
+
+**Result:** All API routes worked correctly through ALB. The ordering lesson: specific paths before catch-all, Prefix instead of Exact for API routing.
 
 ---
 
-### #14b — Subnet IDs Change After Rebuild
+### #28 — Subnet IDs Change After EKS Rebuild
 
-**Severity:** High | **Category:** AWS Infrastructure
+**Severity:** Medium | **Category:** AWS Infrastructure, EKS
 
 #### What Happened
 
-After a complete infrastructure rebuild (destroy + apply), the ALB Controller failed to create ALBs. Ingress objects showed error:
+After rebuilding the EKS cluster, the ALB Ingress Controller failed to create the ALB:
 
 ```
-Failed build model due to: failed to resolve subnets: unable to find at least 2 qualifying subnets.
-Subnets must reside in VPC vpc-0newid and must have allowed tagging.
-Subnet subnet-0oldid not found in VPC vpc-0newid.
+Error creating ALB: InvalidSubnet: The subnet ID 'subnet-0abc123def456' does not exist
 ```
+
+The Ingress YAML had hardcoded subnet IDs from the previous cluster. Those subnets were deleted with the old VPC.
 
 #### Root Cause
 
-AWS assigns subnet IDs randomly. After `terraform destroy` deleted the VPC and subnets, `terraform apply` created new subnets with **completely new IDs**. But the Ingress YAML still had the old subnet IDs hardcoded:
-
-```yaml
-# Ingress annotation — hardcoded old IDs
-alb.ingress.kubernetes.io/subnets: subnet-0abc123def,subnet-0ghi456jkl   # OLD IDs, no longer exist
-```
+Every `terraform destroy && apply` cycle creates new VPC and subnet resources with new IDs. Any Kubernetes manifest that hardcodes these IDs becomes stale after a rebuild.
 
 #### Exact Fix
 
-After every rebuild, fetch the new subnet IDs and update Ingress YAMLs:
+Use subnet tags for auto-discovery instead of hardcoding IDs:
 
-```bash
-# Get new public subnet IDs
-VPC_ID=$(terraform output -raw vpc_id)
-aws ec2 describe-subnets \
-  --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=*public*" \
-  --query 'Subnets[*].{ID:SubnetId,AZ:AvailabilityZone}' \
-  --output table
-
-# Update Ingress YAMLs with new IDs
-sed -i "s|alb.ingress.kubernetes.io/subnets:.*|alb.ingress.kubernetes.io/subnets: subnet-NEWID1,subnet-NEWID2|" \
-  helm/finbank-ingress-dev.yaml
-```
-
-**Better long-term solution:** Use subnet autodiscovery instead of hardcoding IDs. Tag your subnets with the right keys and let the ALB Controller find them automatically:
-
-```yaml
-# Terraform VPC module
+```hcl
+# In Terraform — tag subnets for ALB discovery
 resource "aws_subnet" "public" {
   tags = {
-    "kubernetes.io/role/elb" = 1  # ← ALB controller autodiscovery tag
     "kubernetes.io/cluster/finbank-dev" = "shared"
+    "kubernetes.io/role/elb"            = "1"    # tells ALB controller: use this for internet-facing ALBs
+  }
+}
+
+resource "aws_subnet" "private" {
+  tags = {
+    "kubernetes.io/cluster/finbank-dev" = "shared"
+    "kubernetes.io/role/internal-elb"   = "1"
   }
 }
 ```
 
-With these tags, you don't need the subnet annotation in Ingress at all — the controller finds subnets automatically.
+In the Ingress YAML — remove the hardcoded `subnets` annotation entirely. The ALB controller reads the tags and auto-discovers the correct subnets:
 
-#### Interview Answer
+```yaml
+# Before (brittle):
+annotations:
+  alb.ingress.kubernetes.io/subnets: "subnet-0abc123,subnet-0def456"
 
-> "After a rebuild, ALB creation failed saying the subnet IDs in my Ingress annotations didn't exist. AWS assigns new random IDs to subnets every time they're recreated. I had old IDs hardcoded in the annotation. The quick fix is fetching new IDs after every rebuild and updating the YAML. The permanent fix is removing subnet annotations entirely and relying on autodiscovery — the ALB Controller scans the VPC for subnets tagged with kubernetes.io/role/elb=1, which Terraform always sets correctly. With autodiscovery, subnet IDs changing is irrelevant."
+# After (resilient — no subnet annotation needed):
+annotations:
+  alb.ingress.kubernetes.io/scheme: internet-facing
+  alb.ingress.kubernetes.io/target-type: ip
+  # subnets discovered via kubernetes.io/role/elb tag on VPC subnets
+```
+
+#### Prevention
+
+- Never hardcode VPC-specific resource IDs (subnet IDs, SG IDs, VPC IDs) in Kubernetes manifests.
+- Always use tags for resource discovery in dynamic environments.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** After rebuilding the FinBank EKS cluster, the ALB Ingress Controller failed because hardcoded subnet IDs in the Ingress YAML pointed to subnets that no longer existed.
+
+**Task:** Make the Ingress configuration resilient to EKS rebuilds without requiring manual ID updates.
+
+**Action:** Removed the hardcoded `subnets` annotation from the Ingress YAML and added `kubernetes.io/role/elb = 1` tags to the public subnet Terraform resources. The ALB controller reads these tags to auto-discover which subnets to use — no IDs needed in the manifest.
+
+**Result:** Subsequent rebuilds provisioned the ALB in the correct subnets automatically. This pattern should be used for any AWS resource that Kubernetes discovers from EC2 tags.
 
 ---
 
-### #22b — IMDS Hop Limit
+### #29 — IMDS Hop Limit Blocks ALB Controller
 
-**Severity:** Medium | **Category:** ALB Controller, EC2 Metadata
+**Severity:** High | **Category:** AWS EC2 Metadata, EKS Networking
 
 #### What Happened
 
-ALB Controller logs showed:
+The AWS Load Balancer Controller kept failing with authentication errors even though IRSA was correctly configured:
 
 ```
-{"level":"error","msg":"failed to get VPC ID from ec2metadata",
- "error":"failed to get VPC ID: EC2MetadataError: failed to make EC2Metadata request"}
+level=error msg="unable to retrieve credentials from EC2 instance metadata service:
+  request send failed: Get http://169.254.169.254/latest/meta-data/iam/security-credentials/:
+  context deadline exceeded"
 ```
-
-The controller was deployed successfully, but it couldn't detect which VPC the cluster was in.
 
 #### Root Cause
 
-The ALB Controller tries to determine the VPC ID by querying the EC2 Instance Metadata Service (IMDS) at `169.254.169.254`. But IMDS requests from pods have a hop count of 1 by default — and going through the pod's network namespace to the node adds an extra hop. Many IMDS requests from pods fail silently.
+AWS IMDS (Instance Metadata Service) at `169.254.169.254` lets EC2 instances get their IAM credentials. By default, IMDS has a **hop limit of 1** — only one network hop allowed.
 
-#### Exact Fix
+In EKS, a pod's request travels: pod → container runtime → node → IMDS. That's 2 hops. With a limit of 1, the request gets dropped at the container runtime boundary. The pod cannot reach IMDS.
 
-Provide the VPC ID explicitly during Helm installation — don't let the controller autodetect it:
+#### How to Diagnose
 
 ```bash
-VPC_ID=$(terraform output -raw vpc_id)
+# Check the current hop limit on EKS nodes
+NODE_ID=$(aws ec2 describe-instances \
+  --filters "Name=tag:aws:eks:cluster-name,Values=finbank-dev" \
+  --query "Reservations[0].Instances[0].InstanceId" \
+  --output text --region ap-south-1)
 
-helm upgrade --install aws-load-balancer-controller \
-  eks/aws-load-balancer-controller \
-  -n kube-system \
-  --set clusterName=finbank-dev \
-  --set serviceAccount.create=false \
-  --set serviceAccount.name=aws-load-balancer-controller \
-  --set vpcId=$VPC_ID \         # ← explicit VPC ID, no IMDS needed
-  --set region=ap-south-1       # ← explicit region too
+aws ec2 describe-instances \
+  --instance-ids $NODE_ID \
+  --query "Reservations[0].Instances[0].MetadataOptions.HttpPutResponseHopLimit" \
+  --region ap-south-1
+# If output is 1 → this is the bug, should be 2
 ```
 
-With `vpcId` and `region` specified, the controller never queries IMDS.
+#### Exact Fix (Step by Step)
 
-#### Interview Answer
+**Option A — Fix existing nodes via CLI:**
 
-> "The ALB Controller was failing to detect the VPC because EC2 instance metadata requests from pods can fail due to hop count limits. By default, IMDS allows 1 network hop, but container-to-node routing counts as an extra hop. The fix is to provide the VPC ID and region explicitly during ALB Controller Helm installation so it never needs to query IMDS. Always specify `--set vpcId=<id>` and `--set region=<region>` in the helm install command."
+```bash
+INSTANCE_IDS=$(aws ec2 describe-instances \
+  --filters "Name=tag:aws:eks:cluster-name,Values=finbank-dev" \
+             "Name=instance-state-name,Values=running" \
+  --query "Reservations[*].Instances[*].InstanceId" \
+  --output text --region ap-south-1)
+
+for INSTANCE_ID in $INSTANCE_IDS; do
+  aws ec2 modify-instance-metadata-options \
+    --instance-id $INSTANCE_ID \
+    --http-put-response-hop-limit 2 \
+    --http-endpoint enabled \
+    --region ap-south-1
+done
+
+kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
+```
+
+**Option B — Set in Terraform node group launch template (permanent fix):**
+
+```hcl
+resource "aws_launch_template" "eks_nodes" {
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_put_response_hop_limit = 2        # ← allows pods to reach IMDS
+    http_tokens                 = "required"   # IMDSv2 only (security best practice)
+  }
+}
+```
+
+#### Prevention
+
+Always set `http_put_response_hop_limit = 2` in the EKS node group launch template in Terraform. This is required for any pod that uses IMDS-based credentials.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** The AWS Load Balancer Controller in FinBank couldn't get IAM credentials — "context deadline exceeded" reaching `169.254.169.254` — even though IRSA was correctly configured.
+
+**Task:** Allow the controller pod to reach the EC2 instance metadata service for credentials.
+
+**Action:** IMDS has a hop limit of 1 by default. Pods are 2 hops from IMDS (pod → node → metadata service). I increased the hop limit to 2 on all node instances using `aws ec2 modify-instance-metadata-options --http-put-response-hop-limit 2`. I also added this to the EKS node group launch template in Terraform so it applies automatically on every rebuild.
+
+**Result:** Controller retrieved credentials through IMDS successfully and began managing ALBs. This is now item 1 on the EKS cluster setup checklist.
 
 ---
 
-## Category F — GitOps & ArgoCD
+## Category F — GitOps, ArgoCD & Application
 
 ---
 
-### #4 — ArgoCD Repo Add Drops Credentials in Zsh
+### #30 — ArgoCD Repo Credentials Dropped in zsh
 
-**Severity:** High | **Category:** ArgoCD, Zsh Shell
+**Severity:** High | **Category:** ArgoCD, Shell Scripting
 
 #### What Happened
 
-After running `argocd repo add` with authentication flags, ArgoCD seemed to accept the command. But when ArgoCD tried to sync from the private GitHub repo, it showed:
+Running `argocd repo add` appeared to succeed but ArgoCD could not clone the private GitHub repo:
 
 ```
-rpc error: code = Unknown desc = authentication required
+FATA[0002] rpc error: code = Unknown desc = authentication required
+  permission to Anshujee/FinBank-DevOps-Notes.git denied to anonymous
 ```
 
-Running `argocd repo list` showed the repo was added but with status "failed" and no credentials.
+The command had been run with `--username` and `--password` flags and returned no error. But ArgoCD stored corrupted credentials.
 
 #### Root Cause
 
-In zsh, when a long command is split across multiple lines using `\` (backslash line continuation), some flags can be silently dropped if there's any whitespace issue after the backslash.
+The GitHub PAT contained special characters (`@`, `!`, `#`) which zsh interprets as shell metacharacters. When passed as a `--password` argument without proper quoting, zsh corrupts the password string before it reaches the ArgoCD CLI. ArgoCD stores the corrupted string. Authentication fails on every sync.
+
+#### How to Diagnose
 
 ```bash
-# WRONG — zsh may silently drop --username and --password flags
-argocd repo add https://github.com/IndiaFinBank/Infra_FinBank.git \
-  --username IndiaFinBank \
-  --password ghp_xxxxxxxxxxxx
-# Result: repo added but WITHOUT credentials
-```
-
-This is a subtle zsh quirk — bash handles this fine, but zsh's interactive parsing differs.
-
-#### Exact Fix
-
-Run the entire `argocd repo add` command as a single line with no backslash continuation:
-
-```bash
-# CORRECT — single line, no line breaks
-argocd repo add https://github.com/IndiaFinBank/Infra_FinBank.git --username IndiaFinBank --password ghp_xxxxxxxxxxxx --insecure
-
-# Verify credentials were saved
+# Check if stored credentials work
 argocd repo list
-# Should show: ConnectionStateSucceeded
+argocd repo get https://github.com/Anshujee/FinBank-DevOps-Notes.git
+# If STATUS shows ConnectionFailed → credentials are corrupted
 ```
 
-#### Interview Answer
+#### Exact Fix (Step by Step)
 
-> "ArgoCD couldn't sync from GitHub — authentication failure even though I had run argocd repo add with credentials. The issue was subtle: I had split the command across multiple lines with backslash continuation in zsh. Some flags, specifically the auth flags, were silently dropped by zsh's line-continuation handling. Rerunning the exact same command as a single line worked immediately. This is one of those bugs that makes you question your sanity — the command looks correct, produces no error, but doesn't do what you expect. Lesson: for argocd CLI commands with authentication, always run as a single line."
+**Option A — Single quotes around password:**
+
+```bash
+argocd repo add https://github.com/Anshujee/FinBank-DevOps-Notes.git \
+  --username Anshujee \
+  --password 'ghp_aBcDeFgH@123!XYZ#token'    # single quotes: no shell interpretation
+```
+
+**Option B (recommended) — Kubernetes Secret (GitOps-native approach):**
+
+```yaml
+# argocd-repo-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: finbank-repo-creds
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+stringData:
+  type: git
+  url: https://github.com/Anshujee/FinBank-DevOps-Notes.git
+  username: Anshujee
+  password: ghp_aBcDeFgH@123!XYZ#token    # no shell interpretation — stored directly in YAML
+```
+
+```bash
+kubectl apply -f argocd-repo-secret.yaml
+```
+
+ArgoCD automatically reads Secrets labeled `argocd.argoproj.io/secret-type: repository`.
+
+**Verify:**
+
+```bash
+argocd repo list
+# STATUS column should show: Successful
+```
+
+#### Prevention
+
+- Always use Kubernetes Secrets for ArgoCD repository credentials.
+- After adding a repo, always verify `argocd repo list` shows `Successful` — never assume it worked.
+
+#### Interview Answer (STAR Format)
+
+**Situation:** After running `argocd repo add` to connect ArgoCD to the private FinBank GitHub repository, ArgoCD showed "unauthenticated" and could not clone the repo.
+
+**Task:** Successfully connect ArgoCD to the private GitHub repository.
+
+**Action:** Traced the issue to zsh interpreting `@`, `!`, `#` in the GitHub PAT as metacharacters, corrupting the password before it reached ArgoCD CLI. Fixed by using a Kubernetes Secret with the `argocd.argoproj.io/secret-type: repository` label — ArgoCD reads these directly without shell interpretation.
+
+**Result:** ArgoCD showed `ConnectionSuccessful` and all ApplicationSet applications started syncing. ArgoCD repository credentials are now always managed as Kubernetes Secrets.
 
 ---
 
-### #15 — OIDC ID Changes After EKS Rebuild
+### #31 — OIDC ID Changed After EKS Rebuild
 
-**Severity:** Critical | **Category:** IRSA, AWS IAM, Security
+**Severity:** Critical | **Category:** AWS IRSA, EKS Identity
 
 #### What Happened
 
-After a full infrastructure rebuild (terraform destroy + apply), all pods that needed secrets were crashing. External Secrets Operator logs showed:
+After rebuilding the EKS cluster (terraform destroy + apply), all IRSA-dependent pods — External Secrets Operator, ALB Ingress Controller — started getting 403 errors:
 
 ```
-SecretSyncError: failed to get secret from AWS Secrets Manager:
-  AccessDeniedException: User arn:aws:sts::<YOUR_AWS_ACCOUNT_ID>:assumed-role/finbank-eso-irsa-role/xxx
-  is not authorized to perform secretsmanager:GetSecretValue
+InvalidIdentityToken: No OpenIDConnect provider found in your account for this URL:
+  oidc.eks.ap-south-1.amazonaws.com/id/NEWOIDCID12345
+WebIdentityErr: failed to retrieve credentials
 ```
 
-But the IAM role and policy were correct — nothing had changed in the Terraform code.
+Everything worked before the rebuild. Only the cluster was recreated.
 
 #### Root Cause
 
-IRSA works through OIDC federation:
-1. EKS creates an OIDC provider with a unique ID (like `oidc.eks.ap-south-1.amazonaws.com/id/ABC123DEF456`)
-2. Your IAM role has a trust policy saying: "Allow service accounts from THIS specific OIDC provider to assume this role"
-3. When EKS is rebuilt, it generates a completely NEW OIDC provider with a NEW ID (like `ABC789GHI012`)
-4. The IAM trust policy still references the OLD ID — which no longer exists
-5. Every attempt by pods to assume the IAM role fails with AccessDeniedException
+Every EKS cluster has a unique OIDC provider URL: `oidc.eks.ap-south-1.amazonaws.com/id/UNIQUEID`. This ID is **different for every EKS cluster creation**.
 
-The OIDC provider ID is embedded in:
-- The IAM role trust policy
-- The ClusterSecretStore annotation
+IRSA trust policies on IAM roles reference this OIDC URL to verify the pod's identity. After a rebuild, the new cluster has a new OIDC ID. The old IAM trust policies still reference the OLD ID. AWS rejects every role assumption attempt with "No OpenIDConnect provider found."
 
-#### Exact Fix
-
-After every EKS rebuild:
+#### How to Diagnose
 
 ```bash
-# Step 1: Get the NEW OIDC ID
-OIDC_ID=$(aws eks describe-cluster \
+# Get the CURRENT cluster's OIDC URL
+aws eks describe-cluster \
   --name finbank-dev \
-  --region ap-south-1 \
   --query "cluster.identity.oidc.issuer" \
-  --output text | cut -d '/' -f 5)
+  --output text --region ap-south-1
+# Example: https://oidc.eks.ap-south-1.amazonaws.com/id/NEWID12345
 
-echo "New OIDC ID: $OIDC_ID"
+# Check what OIDC URL is in the trust policy of an IRSA role
+aws iam get-role \
+  --role-name finbank-dev-external-secrets-role \
+  --query "Role.AssumeRolePolicyDocument" | grep oidc
+# If it shows the OLD ID → trust policy is stale
+```
 
-# Step 2: Update the IAM trust policy for ESO role
-ACCOUNT_ID=<YOUR_AWS_ACCOUNT_ID>
-cat > /tmp/trust-policy.json << EOF
+#### Exact Fix (Step by Step)
+
+**If IRSA is managed by Terraform (from #17 — the correct approach):**
+
+Terraform uses `data.aws_iam_openid_connect_provider.eks.url` which is dynamic. Running `terraform apply` after a cluster rebuild automatically detects the new OIDC URL and updates all trust policies:
+
+```bash
+terraform apply    # automatically updates OIDC references in all trust policies
+kubectl rollout restart deployment/external-secrets -n external-secrets
+kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
+```
+
+**If IRSA was created manually — update trust policy for each role:**
+
+```bash
+# Get the new OIDC URL (without https://)
+NEW_OIDC_URL=$(aws eks describe-cluster \
+  --name finbank-dev \
+  --query "cluster.identity.oidc.issuer" \
+  --output text --region ap-south-1 | sed 's|https://||')
+
+# Register the new OIDC provider in IAM
+aws iam create-open-id-connect-provider \
+  --url https://$NEW_OIDC_URL \
+  --client-id-list sts.amazonaws.com \
+  --thumbprint-list 9e99a48a9960b14926bb7f3b02e22da2b0ab7280
+
+# Update trust policy for each IRSA role
+ROLE="finbank-dev-external-secrets-role"
+NEW_TRUST=$(cat <<EOF
 {
   "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::${ACCOUNT_ID}:oidc-provider/oidc.eks.ap-south-1.amazonaws.com/id/${OIDC_ID}"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "oidc.eks.ap-south-1.amazonaws.com/id/${OIDC_ID}:sub": "system:serviceaccount:external-secrets:external-secrets",
-          "oidc.eks.ap-south-1.amazonaws.com/id/${OIDC_ID}:aud": "sts.amazonaws.com"
-        }
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Federated": "arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:oidc-provider/$NEW_OIDC_URL"},
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "${NEW_OIDC_URL}:sub": "system:serviceaccount:external-secrets:external-secrets",
+        "${NEW_OIDC_URL}:aud": "sts.amazonaws.com"
       }
     }
-  ]
+  }]
 }
 EOF
+)
+aws iam update-assume-role-policy --role-name $ROLE --policy-document "$NEW_TRUST"
 
-aws iam update-assume-role-policy \
-  --role-name finbank-eso-irsa-role \
-  --policy-document file:///tmp/trust-policy.json
-
-# Step 3: Restart ESO to pick up the new identity
-kubectl rollout restart deployment external-secrets -n external-secrets
-
-# Step 4: Verify
-kubectl get externalsecrets -A
-# Should show: Ready=True, Status=SecretSynced
+# Restart pods to pick up new credentials
+kubectl rollout restart deployment/external-secrets -n external-secrets
 ```
 
-This is now the **first item** on the post-rebuild checklist.
+#### Prevention
 
-#### Interview Answer
+- Always manage IRSA with Terraform — it auto-updates OIDC references after every rebuild.
+- Add to post-rebuild checklist: verify `aws iam get-role --role-name ... --query Role.AssumeRolePolicyDocument` shows the current cluster's OIDC ID.
 
-> "After a rebuild, all secrets were failing with AccessDeniedException even though the IAM policy was correct. IRSA authentication relies on OIDC federation — the IAM role trust policy includes the specific OIDC provider ID for the EKS cluster. Every time you destroy and recreate EKS, it generates a completely new OIDC provider with a new ID. The old trust policy is now pointing to an ID that doesn't exist. The fix is updating the trust policy with the new OIDC ID after every rebuild. We scripted this using aws eks describe-cluster to get the new ID and aws iam update-assume-role-policy to apply it. It's now step 3 in our rebuild checklist."
+#### Interview Answer (STAR Format)
+
+**Situation:** After rebuilding the FinBank EKS cluster from scratch, all pods using IRSA failed with "InvalidIdentityToken: No OpenIDConnect provider found."
+
+**Task:** Restore IRSA functionality for External Secrets Operator and ALB Ingress Controller.
+
+**Action:** Every new EKS cluster gets a new unique OIDC provider ID. All IRSA trust policies still referenced the old ID — AWS rejects role assumption because the old OIDC provider no longer exists. Since IRSA was managed by Terraform, running `terraform apply` automatically updated all trust policies with the new OIDC URL. For any manually-created roles, I update the trust policy JSON with the new OIDC ARN.
+
+**Result:** All IRSA-dependent pods worked after `terraform apply` and rollout restart. This is now step 3 of the post-rebuild checklist: verify OIDC trust policies are current.
 
 ---
 
-### #18 — ArgoCD ApplicationSet CrashLoop
+### #32 — ArgoCD ApplicationSet Crashes on Install
 
-**Severity:** Low | **Status:** Non-blocking | **Category:** ArgoCD
+**Severity:** High | **Category:** ArgoCD Configuration
 
 #### What Happened
 
-When trying to use ArgoCD ApplicationSet to manage all 9 apps (3 services × 3 environments) from a single manifest, the ApplicationSet controller went into CrashLoopBackOff:
+After installing ArgoCD and applying the ApplicationSet resource that manages all 9 applications, ArgoCD rejected it:
 
-```
-Error: applicationsets.argoproj.io is forbidden:
-  User "system:serviceaccount:argocd:argocd-applicationset-controller"
-  cannot list resource "applicationsets" in API group "argoproj.io"
+```bash
+kubectl apply -f argocd/applicationset.yaml
+# Error from server: error when creating "argocd/applicationset.yaml":
+#   the server could not find the requested resource
+#   (post applicationsets.argoproj.io)
 ```
 
 #### Root Cause
 
-The version of ArgoCD installed via `kubectl apply` had a mismatch between the ApplicationSet controller's RBAC permissions and the API group version. The controller's ClusterRole didn't include permissions for the `applicationsets` resource under the `argoproj.io` API group.
+The `ApplicationSet` CRD (Custom Resource Definition) was not installed. This happens with:
+- Older ArgoCD versions (pre-2.0) that don't include the ApplicationSet controller
+- Incomplete ArgoCD installation (only server installed, not the full bundle)
+- Wrong `apiVersion` in the YAML that triggers schema validation failure
 
-#### Decision Made
+#### How to Diagnose
 
-**Not fixed — not used in FinBank.** We manage 9 ArgoCD apps individually via separate YAML files. This is acceptable for 9 apps. ApplicationSet would be useful at 30+ apps.
+```bash
+# Check if the CRD exists
+kubectl get crd applicationsets.argoproj.io
+# "Error from server (NotFound)" → CRD is missing
 
-The 9 individual app YAMLs are:
+# Check ArgoCD version
+kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server \
+  -o jsonpath='{.items[0].spec.containers[0].image}'
+
+# Check all ArgoCD CRDs
+kubectl get crd | grep argoproj
 ```
-argocd/
-├── finbank-backend-app.yaml      (dev)
-├── finbank-backend-staging.yaml  (staging)
-├── finbank-backend-prod.yaml     (prod)
-├── finbank-frontend-app.yaml
-├── finbank-frontend-staging.yaml
-├── finbank-frontend-prod.yaml
-├── finbank-analytics-app.yaml
-├── finbank-analytics-staging.yaml
-└── finbank-analytics-prod.yaml
+
+#### Exact Fix (Step by Step)
+
+```bash
+# Reinstall ArgoCD with the full official manifest (includes ApplicationSet CRD)
+kubectl delete namespace argocd
+kubectl create namespace argocd
+kubectl apply -n argocd \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# Wait for pods
+kubectl wait --for=condition=ready pod \
+  -l app.kubernetes.io/name=argocd-server -n argocd --timeout=180s
+
+# Verify CRD exists now
+kubectl get crd applicationsets.argoproj.io
+
+# Apply the ApplicationSet
+kubectl apply -f argocd/applicationset.yaml
 ```
 
-#### Interview Answer
+**Correct ApplicationSet YAML structure:**
 
-> "I tried to use ArgoCD ApplicationSet to template all 9 applications, but the controller crashed due to missing RBAC permissions — version mismatch between the installed ArgoCD and the ApplicationSet CRD. I chose not to investigate further and instead manage 9 individual ArgoCD application YAMLs. At 9 applications, the overhead is manageable. ApplicationSet becomes valuable at 30+ applications where manual management creates drift. This was a pragmatic tradeoff: spend time debugging a non-critical tooling issue, or deliver working GitOps in the next 20 minutes."
+```yaml
+apiVersion: argoproj.io/v1alpha1    # correct API version for ArgoCD 2.x
+kind: ApplicationSet
+metadata:
+  name: finbank-apps
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - service: backend
+        namespace: finbank-dev
+        values: values.yaml
+      - service: backend
+        namespace: finbank-stage
+        values: values-staging.yaml
+      - service: frontend
+        namespace: finbank-dev
+        values: values.yaml
+      - service: frontend
+        namespace: finbank-stage
+        values: values-staging.yaml
+      - service: analytics
+        namespace: finbank-dev
+        values: values.yaml
+      - service: analytics
+        namespace: finbank-stage
+        values: values-staging.yaml
+  template:
+    metadata:
+      name: 'finbank-{{service}}-{{namespace}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/Anshujee/FinBank-DevOps-Notes.git
+        targetRevision: main
+        path: 'helm/finbank-{{service}}'
+        helm:
+          valueFiles:
+          - '{{values}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+```
+
+#### Interview Answer (STAR Format)
+
+**Situation:** After installing ArgoCD in FinBank cluster, applying the ApplicationSet resource failed with "the server could not find the requested resource" — the ApplicationSet API type didn't exist.
+
+**Task:** Get the ApplicationSet working so ArgoCD could manage all 9 applications (3 services × 3 environments) from a single configuration.
+
+**Action:** Ran `kubectl get crd applicationsets.argoproj.io` — NotFound. The ApplicationSet CRD was not installed. This indicated an incomplete ArgoCD installation. I reinstalled using the official `stable` manifest which includes the ApplicationSet controller and all required CRDs. After installation, the ApplicationSet YAML applied successfully and all 9 ArgoCD applications were created.
+
+**Result:** All 9 apps (finbank-backend-finbank-dev, finbank-backend-finbank-stage, etc.) appeared in ArgoCD and began syncing their Helm charts from Git. Any change to a Helm values file now automatically propagates to the correct environment.
 
 ---
 
-## Summary Table — All 24 Challenges
+### #33 — Registration API Returns Validation Failed
 
-| # | Category | Issue | Status | Key Lesson |
-|---|---|---|---|---|
-| 1 | Docker | exec format error (ARM64 vs AMD64) | Fixed | Always use Buildx for multi-arch when on Mac M1 |
-| 2 | ECR | Multi-arch image deletion | Fixed | Delete tag → untagged → repo. Or use --force |
-| 3 | Jenkins | Credential ID mismatch (space vs hyphen) | Fixed | Use exact IDs from Jenkins UI, standardize naming |
-| 4 | ArgoCD | zsh drops auth flags on multiline command | Fixed | Run argocd repo add as single line |
-| 5 | K8s | localhost in values.yaml → CrashLoop | Fixed | Kubernetes pods cannot reach localhost for external services |
-| 6 | K8s | Empty RDS schema → startup failure | Fixed | DDL auto=update for dev, Flyway for prod |
-| 7 | K8s | Wrong Spring profile (dev vs docker) | Fixed | Always use 'docker' profile in containers |
-| 8 | K8s | Wrong Redis env var (Spring Boot 3 renamed them) | Fixed | Spring Boot 3 = SPRING_DATA_REDIS_HOST |
-| 9 | Terraform | Destroy blocked by ALB (not in state) | Fixed | Delete Ingress FIRST before terraform destroy |
-| 10 | Terraform | Orphaned ELB security group | Fixed | Manually delete orphaned SGs before VPC deletion |
-| 11 | Terraform | State lock from interrupted apply | Fixed | terraform force-unlock -force LOCK_ID |
-| 12 | Terraform | Variable specified twice | Fixed | Pick one: -var OR TF_VAR_, never both |
-| 13 | ALB | Missing IAM permission (DescribeListenerAttributes) | Fixed | Add inline policy for missing permissions |
-| 14 | ALB | Wrong Ingress path (/api vs /api/v1) | Fixed | Path must match Spring Boot context-path exactly |
-| 14b | ALB | Subnet IDs change after rebuild | Fixed | Use autodiscovery tags instead of hardcoded IDs |
-| 15 | IRSA | OIDC ID changes after EKS rebuild | Fixed | Update trust policy after every EKS rebuild |
-| 16 | K8s | Wrong backend context path in Ingress | Fixed | Verify Spring context-path before writing Ingress |
-| 17 | Docker | Jenkins container DNS resolution failure | Fixed | Start Jenkins with --dns 8.8.8.8 |
-| 18 | ArgoCD | ApplicationSet controller RBAC crash | Non-blocking | Use individual app YAMLs instead |
-| 19 | Security | BCrypt $2b$ vs $2a$ prefix mismatch | Deferred | Use Spring's hasher for all password generation |
-| 20 | Shell | zsh curly brace glob expansion in terraform | Fixed | Use TF_VAR_ env vars instead of -var flags |
-| 21 | Jenkins | Staging image tag never updated | Fixed | Update ALL values files in Stage 9 |
-| 22 | K8s | IP exhaustion in staging (pods Pending) | Fixed | Set replicaCount=1 in staging; use prefix delegation |
-| 22b | ALB | IMDS hop limit blocks VPC detection | Fixed | Set --set vpcId and --set region explicitly |
-| 23 | Database | Staging DB missing after every rebuild | Fixed | null_resource in databases.tf auto-creates schemas |
-| 24 | K8s | Wrong staging profile (dev database used) | Fixed | Verify database name in values-staging.yaml |
+**Severity:** Medium | **Category:** Application API, Database Schema
+
+#### What Happened
+
+While testing the FinBank registration flow, POST `/api/v1/auth/register` returned HTTP 400:
+
+```json
+{
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Validation failed for fields: [phone, dateOfBirth]",
+  "path": "/api/v1/auth/register"
+}
+```
+
+Request being sent:
+```json
+{
+  "email": "test@finbank.com",
+  "password": "SecurePass123!",
+  "firstName": "Test",
+  "lastName": "User"
+}
+```
+
+#### Root Cause
+
+The `users` table has two `NOT NULL` columns without defaults:
+
+```sql
+phone       VARCHAR(15) NOT NULL,
+date_of_birth DATE NOT NULL
+```
+
+These are mapped to Java entity fields with `@NotNull` / `@Column(nullable = false)`. Spring Validator rejects the request before it reaches the database layer because the required fields are missing from the request body.
+
+This is correct behavior for a banking application — phone and date of birth are required for KYC (Know Your Customer) compliance.
+
+#### How to Diagnose
+
+```bash
+# Check the table schema
+mysql -h finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com \
+  -u finbank_admin -p<YOUR_DB_PASSWORD> finbank_dev_db \
+  -e "DESCRIBE users;"
+# Look for NOT NULL columns with no DEFAULT value
+
+# Test with all fields
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@finbank.com",
+    "password": "SecurePass123!",
+    "firstName": "Test",
+    "lastName": "User",
+    "phone": "+91-9876543210",
+    "dateOfBirth": "1990-05-15"
+  }'
+```
+
+#### Exact Fix
+
+Include all required fields in registration requests:
+
+```json
+POST /api/v1/auth/register
+{
+  "email": "test@finbank.com",
+  "password": "SecurePass123!",
+  "firstName": "Test",
+  "lastName": "User",
+  "phone": "+91-9876543210",
+  "dateOfBirth": "1990-05-15"
+}
+```
+
+Document all required fields in an OpenAPI spec:
+
+```yaml
+# openapi.yaml
+paths:
+  /api/v1/auth/register:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, firstName, lastName, phone, dateOfBirth]
+              properties:
+                email:
+                  type: string
+                  format: email
+                phone:
+                  type: string
+                  example: "+91-9876543210"
+                dateOfBirth:
+                  type: string
+                  format: date
+                  example: "1990-05-15"
+```
+
+#### Prevention
+
+- Document all required API fields in an OpenAPI spec committed to the repo.
+- Add API contract tests in Jenkins that test both happy path (all fields) and validation failures (missing fields).
+
+#### Interview Answer (STAR Format)
+
+**Situation:** During functional testing of FinBank's registration flow, the API returned HTTP 400 "Validation failed: phone, dateOfBirth" even with email, password, and name in the request.
+
+**Task:** Understand why registration was failing and fix the request or schema.
+
+**Action:** Checked the database schema — `phone` and `date_of_birth` are `NOT NULL` without defaults, mapped to `@NotNull` Java entity fields. Spring Validator correctly rejected the incomplete request. Since FinBank is a banking application requiring KYC, phone and date of birth are legitimately mandatory. I updated all test requests and created an OpenAPI spec documenting required vs optional fields.
+
+**Result:** Registration worked with all required fields. The OpenAPI spec gives frontend developers and testers a clear reference for the full request body format.
 
 ---
 
-*These are real mistakes that happened during the FinBank project. Every one of them taught something that cannot be learned from tutorials. In interviews, describe 2-3 of these in detail — choose ones relevant to the role, explain the root cause clearly, and emphasise what you would do differently (and have done differently) as a result.*
+## Quick Reference: Diagnostic Commands
+
+```bash
+# === KUBERNETES ===
+# Check pod status — find anything not Running
+kubectl get pods -A | grep -v Running | grep -v Completed
+
+# Check why a pod is crashing
+kubectl describe pod <pod-name> -n <namespace> | tail -20
+kubectl logs <pod-name> -n <namespace> --previous
+
+# Check env vars inside a running pod
+kubectl exec -it deployment/<name> -n <namespace> -- env | grep -i <search>
+
+# Check HPA status — TARGETS should show a %, not <unknown>
+kubectl get hpa -A
+kubectl describe hpa <name> -n <namespace>
+
+# Check PDB — Current Healthy should be > 0
+kubectl describe pdb <name> -n <namespace>
+
+# === TERRAFORM ===
+terraform state list                                    # see all tracked resources
+terraform force-unlock <LOCK_ID>                        # release stale lock
+terraform output                                        # see all output values
+terraform plan -target=module.rds                       # plan specific module only
+
+# === AWS ===
+# EKS OIDC URL (changes after every rebuild!)
+aws eks describe-cluster --name finbank-dev \
+  --query "cluster.identity.oidc.issuer" --output text --region ap-south-1
+
+# What's inside a VPC (before terraform destroy)
+aws ec2 describe-instances --filters "Name=vpc-id,Values=<VPC_ID>"
+aws elbv2 describe-load-balancers --region ap-south-1
+
+# IRSA — check if role has policies attached
+aws iam list-attached-role-policies --role-name <role-name>
+
+# RDS — connect and check tables
+mysql -h finbank-dev-mysql.cbmkgsmi8kk5.ap-south-1.rds.amazonaws.com \
+  -u finbank_admin -p<YOUR_DB_PASSWORD> finbank_dev_db -e "SHOW TABLES;"
+
+# === ARGOCD ===
+argocd app list                    # all app statuses
+argocd app get <app-name>          # details on one app
+argocd app sync <app-name>         # force sync
+argocd repo list                   # check repo connection status
+```
+
+---
+
+## STAR Interview Answer Templates
+
+Use these patterns for any troubleshooting question in an interview:
+
+**Opening — Situation:**
+> "During the FinBank project — a multi-microservice banking platform on AWS EKS with GitOps deployment via ArgoCD — I encountered..."
+
+**Middle — Task + Action:**
+> "I needed to... I diagnosed by running [command]. I found [root cause]. I fixed it by [step-by-step actions]. The key commands were [commands]."
+
+**Closing — Result:**
+> "After the fix [outcome]. I also automated this to prevent recurrence by [prevention step] and documented it in [where]."
+
+**Metrics to mention:**
+- 3 microservices: Spring Boot backend, React frontend, FastAPI analytics
+- EKS: Kubernetes 1.31, t3.medium nodes, ap-south-1 region
+- GitOps: ArgoCD with 9 applications (3 services × 3 environments)
+- CI/CD: Jenkins with 9-stage backend pipeline
+- IaC: Terraform with S3 state backend + DynamoDB locking
+- Security: Trivy scanning, IRSA, External Secrets Operator, AWS Secrets Manager
+
+---
+
+*FinBank DevOps Troubleshooting Guide — 33 challenges documented*
