@@ -213,6 +213,156 @@ git checkout develop && git merge main  # sync back
 git branch -d release/v1.0.0
 ```
 
+#### Why a Separate Release Branch? — The Real Company Way
+
+Think of it like this. Your `develop` branch is a kitchen where chefs (developers) are constantly cooking new dishes. You cannot serve food directly from a live kitchen to customers — it's messy, things change every minute. So before service, you take a fixed set of dishes to the dining room, present them, and if something is wrong you fix only that plate. The `release` branch is that dining room — a frozen snapshot from `develop` that you polish before handing to customers (production).
+
+**Step-by-step explanation of the real company flow:**
+
+**Step 1 — Feature Freeze (decide what goes in the release)**
+
+In a real company, the Product Manager and Engineering Lead sit together and decide: "v1.0.0 will contain these 12 features. Everything else waits for v1.1.0." This is called a **feature freeze**. Once decided, developers stop adding new features to `develop` for this release cycle.
+
+```
+develop branch at the time of feature freeze:
+FBP-14 ✅ Spring Boot setup
+FBP-35 ✅ Docker multi-arch build
+FBP-88 ✅ Terraform EKS setup
+FBP-102 ✅ Jenkins pipeline
+FBP-120 🚧 New loan calculator (NOT READY — excluded from v1.0.0)
+```
+
+**Step 2 — Cut the release branch from develop**
+
+```bash
+git checkout develop               # make sure you are on develop
+git pull origin develop            # get latest code
+git checkout -b release/v1.0.0    # create release branch from here
+git push origin release/v1.0.0    # push to GitHub so team can see it
+```
+
+At this point `release/v1.0.0` is an exact copy of `develop` at this moment. Developers continue pushing new features to `develop` — those changes do NOT affect the release branch. The release branch is now **isolated**.
+
+**Step 3 — QA testing happens on the release branch**
+
+The QA (Quality Assurance) team deploys `release/v1.0.0` to the **staging environment** and runs full test cycles:
+- Functional testing (does login work? does transfer work?)
+- Regression testing (did anything that worked before now break?)
+- Performance testing (how many users can it handle?)
+- Security testing (penetration testing, vulnerability scan)
+
+In FinBank, this means:
+```bash
+# Jenkins pipeline runs against release/v1.0.0 branch
+# Deploys to finbank-stage namespace
+# QA team tests all 18 APIs manually + automated tests
+```
+
+**Step 4 — Only bug fixes go into the release branch**
+
+During testing, QA finds bugs. Developers fix ONLY those bugs directly on `release/v1.0.0`. No new features allowed here.
+
+```bash
+# Developer fixes a bug found during QA
+git checkout release/v1.0.0
+git checkout -b fix/login-timeout-bug     # small fix branch
+# fix the bug
+git commit -m "fix(FBP-145): increase JWT timeout to prevent premature logout"
+# merge fix back to release branch via Pull Request
+git checkout release/v1.0.0
+git merge fix/login-timeout-bug
+git push origin release/v1.0.0
+```
+
+**Step 5 — Release approval (Change Advisory Board in large companies)**
+
+In MNCs like TCS, Infosys, or a bank, there is a **CAB meeting (Change Advisory Board)** before every production release. Senior engineers, operations team, security team, and management review:
+- What is changing?
+- What is the rollback plan if it fails?
+- What is the deployment window? (usually nights or weekends — low traffic)
+- Who is on-call during the deployment?
+
+Only after CAB approval does the deployment to production proceed.
+
+**Step 6 — Merge to main and tag**
+
+Once QA signs off and CAB approves:
+
+```bash
+git checkout main
+git pull origin main                              # ensure main is up to date
+git merge --no-ff release/v1.0.0                 # --no-ff keeps history clean
+git tag -a v1.0.0 -m "Release v1.0.0: first production release"
+git push origin main
+git push origin v1.0.0                           # push the tag separately
+```
+
+The `--no-ff` flag (no fast-forward) creates a **merge commit** even if it could skip one. This keeps a visible record in git history that "at this point, v1.0.0 was released". Without it, git rewrites history and you lose the release boundary.
+
+The **tag** `v1.0.0` is a permanent bookmark on the commit. Even 2 years later, you can run `git checkout v1.0.0` and get the exact code that was in production on release day. Tags are used for:
+- Rollback (checkout old tag and redeploy)
+- Audit trail (what code was running on a specific date)
+- Docker image naming (image tag `v1.0.0` maps to git tag `v1.0.0`)
+
+**Step 7 — Sync bug fixes back to develop**
+
+The bugs fixed in `release/v1.0.0` must go back into `develop`, otherwise those bugs will reappear in the next release:
+
+```bash
+git checkout develop
+git merge main                    # main now has release + all bug fixes
+git push origin develop
+```
+
+**Step 8 — Clean up and declare the release done**
+
+```bash
+git branch -d release/v1.0.0           # delete local release branch
+git push origin --delete release/v1.0.0  # delete from GitHub too
+```
+
+The release branch is temporary — it served its purpose. Keeping it around causes confusion about where to merge new work.
+
+#### The Full Picture — All Branches Together
+
+```
+main        ────●─────────────────────────────────●── (tagged v1.0.0)
+                 \                               /
+release/v1.0.0    ●───●(bug fix)───●(bug fix)──●   (QA tested, then merged to main)
+                 /
+develop     ────●────●────●────●────●────●────●──── (active development continues)
+                 \   /    \   /    \   /
+feature       feat1  feat2  feat3  feat4  (merged via Pull Requests)
+```
+
+#### Semantic Versioning — What v1.0.0 Means
+
+```
+v  1  .  0  .  0
+   |     |     |
+   |     |     └── PATCH — bug fix, no new features (v1.0.1, v1.0.2)
+   |     └──────── MINOR — new features, backward compatible (v1.1.0, v1.2.0)
+   └────────────── MAJOR — breaking changes, APIs changed (v2.0.0)
+```
+
+Real examples from FinBank:
+- `v1.0.1` — fixed the BCrypt $2b$ bug (patch, no new feature)
+- `v1.1.0` — added loan calculator feature (minor, new feature added)
+- `v2.0.0` — rewrote authentication to use OAuth2 (major, breaking API change)
+
+#### How ArgoCD Fits Into This
+
+In FinBank, once `main` is tagged `v1.0.0`, the Jenkins pipeline triggers on `main` and builds a Docker image tagged `v1.0.0`. It commits that tag to `values-prod.yaml`. ArgoCD detects the change and deploys `v1.0.0` to `finbank-prod` namespace automatically. The entire deployment is hands-off after the git tag is pushed.
+
+```
+git tag v1.0.0 + git push
+    → Jenkins pipeline on main branch
+    → Docker image: finbank-backend:v1.0.0 pushed to ECR
+    → values-prod.yaml updated: tag: v1.0.0
+    → ArgoCD detects change → deploys to finbank-prod
+    → Production is live with v1.0.0
+```
+
 ---
 
 ## 5. Phase 2-3: Application Development
