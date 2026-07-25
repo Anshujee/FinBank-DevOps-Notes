@@ -663,6 +663,10 @@ ArgoCD watches the repo, sees the new tag, and automatically deploys. The `[skip
 
 ### What is IaC and Why Does It Matter?
 
+Imagine you want to set up a big office building with electricity, plumbing, rooms, and security systems. You could hire workers to do it all by hand — but if the building burns down, they have to remember everything and do it again manually, differently each time.
+
+**Terraform is like an architectural blueprint.** You write exactly what you want in code files, and Terraform reads those files and automatically builds everything in AWS. If you destroy it and run again — identical result, every time.
+
 **Without IaC (manual clicks in AWS Console):**
 - Nobody knows what was configured
 - Can't reproduce it — every environment is different
@@ -676,28 +680,33 @@ ArgoCD watches the repo, sees the new tag, and automatically deploys. The `[skip
 - Peer review infrastructure changes via Pull Requests
 - Full audit trail in Git history
 
+---
+
 ### Terraform Module Structure
 
+Think of it like a recipe book:
+
 ```
-Infra_FinBank/aws/terraform/
-├── main.tf           # Orchestrator — calls all modules
-├── variables.tf      # Input parameters
-├── outputs.tf        # Exported values (subnet IDs, RDS endpoint, etc.)
-├── versions.tf       # Provider versions (AWS, Kubernetes, null)
-├── databases.tf      # null_resource to create MySQL schemas
+aws/terraform/
+├── versions.tf     ← "what tools do we need?" (Terraform + AWS plugin versions)
+├── variables.tf    ← "what are our settings?" (regions, sizes, passwords)
+├── main.tf         ← "the main recipe" (calls all 6 modules)
+├── outputs.tf      ← "what do we get back?" (URLs, endpoints, IDs)
+├── databases.tf    ← "special step after cooking" (auto-creates MySQL databases)
 ├── environments/
 │   └── dev/
-│       └── terraform.tfvars   # Dev environment values
+│       └── terraform.tfvars   ← "actual values for dev" (like filling in blanks)
 └── modules/
-    ├── vpc/           # VPC, subnets, NAT Gateway, Internet Gateway, route tables
-    ├── eks/           # EKS cluster, node group, IAM roles, OIDC provider
-    ├── rds/           # MySQL instance, subnet group, security group, parameter group
-    ├── elasticache/   # Redis cluster, subnet group, security group
-    ├── ecr/           # 3 ECR repositories (backend, frontend, analytics)
-    └── secretsmanager/ # 3 secrets (per env), IAM policy, IRSA role
+    ├── vpc/           # Module 1: The network
+    ├── eks/           # Module 2: Kubernetes cluster
+    ├── rds/           # Module 3: MySQL database
+    ├── ecr/           # Module 4: Docker image storage
+    ├── elasticache/   # Module 5: Redis cache
+    └── secretsmanager/ # Module 6: Secrets vault
 ```
 
-**How modules wire together:**
+**How modules wire together — each module's output feeds the next module's input:**
+
 ```hcl
 # main.tf — modules share outputs as inputs
 module "vpc" {
@@ -716,129 +725,797 @@ module "rds" {
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
 }
+
+module "secretsmanager" {
+  db_host           = module.rds.db_host               # from RDS
+  redis_host        = module.elasticache.redis_endpoint # from ElastiCache
+  oidc_provider_arn = module.eks.oidc_provider_arn     # from EKS
+}
 ```
 
-### VPC Architecture
+It is like a chain — VPC is created first, then EKS and RDS use VPC's outputs, then Secrets Manager uses outputs from RDS, ElastiCache, and EKS together.
 
-```
-VPC: 10.0.0.0/16
-├── Public Subnets (ALB lives here — internet-facing)
-│   ├── 10.0.1.0/24 — ap-south-1a
-│   └── 10.0.2.0/24 — ap-south-1b
-│   Tags: kubernetes.io/role/elb=1  (ALB controller discovers these)
-│
-├── Private Subnets (EKS nodes, RDS, Redis — no direct internet)
-│   ├── 10.0.3.0/24 — ap-south-1a
-│   └── 10.0.4.0/24 — ap-south-1b
-│   Tags: kubernetes.io/role/internal-elb=1
-│
-├── Internet Gateway → attached to VPC, routes public subnet traffic to internet
-├── NAT Gateway → in public subnet, allows private subnet resources to reach internet
-│   (to pull Docker images from ECR, install OS packages, etc.)
-└── Route Tables
-    ├── Public RT: 0.0.0.0/0 → Internet Gateway
-    └── Private RT: 0.0.0.0/0 → NAT Gateway
-```
+---
 
-**Why private subnets for EKS nodes and RDS:**
-RDS and EKS worker nodes are not directly reachable from the internet. You can't SSH into the nodes. You can't connect to MySQL directly from your laptop. They only communicate with other resources inside the VPC.
-
-### EKS Module — What It Creates
+### File: `versions.tf` — The Foundation
 
 ```hcl
-# IAM Role for EKS Cluster (AWS manages control plane using this)
-resource "aws_iam_role" "cluster" { ... }
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    aws  = { source = "hashicorp/aws", version = "~> 5.0" }
+    tls  = { source = "hashicorp/tls", version = "~> 4.0" }
+    null = { source = "hashicorp/null", version = "~> 3.0" }
+  }
 
-# IAM Role for Worker Nodes (EC2s that run your pods)
-# Permissions needed:
-# - AmazonEKSWorkerNodePolicy (connect to cluster)
-# - AmazonEKS_CNI_Policy (give pods VPC IP addresses)
-# - AmazonEC2ContainerRegistryReadOnly (pull images from ECR)
-
-# OIDC Provider — enables pods to assume IAM roles (IRSA)
-resource "aws_iam_openid_connect_provider" "cluster" { ... }
-
-# EKS Cluster
-resource "aws_eks_cluster" "main" {
-  name    = "finbank-dev"
-  version = "1.31"
-  # Control plane logging to CloudWatch:
-  enabled_cluster_log_types = ["api", "audit", "authenticator", ...]
+  backend "s3" {
+    bucket         = "finbank-terraform-state-860616633001"
+    key            = "finbank/dev/terraform.tfstate"
+    region         = "ap-south-1"
+    dynamodb_table = "finbank-terraform-locks"
+    encrypt        = true
+  }
 }
 
-# Worker Nodes (EC2 instances)
-resource "aws_eks_node_group" "main" {
-  instance_types = ["t3.medium"]  # 2 vCPU, 4GB RAM
-  scaling_config {
-    min_size     = 1
-    max_size     = 5
-    desired_size = 3    # 3 for apps, 4 when monitoring added
+provider "aws" {
+  region = var.aws_region
+  default_tags {
+    tags = { Project = "FinBank", Environment = var.environment, ManagedBy = "Terraform" }
   }
 }
 ```
 
-**IMPORTANT — OIDC ID Changes Every Rebuild:**
-Every time you destroy and recreate EKS, it generates a NEW OIDC provider ID. Any IAM trust policies that reference the old OIDC ID will break. After every `terraform apply`, run:
+**What each part means:**
+
+- **`required_version`** — minimum Terraform version. Like saying "this recipe needs at least oven model 2020."
+- **`required_providers`** — plugins Terraform needs:
+  - `aws` — the main plugin that creates EC2, S3, EKS, RDS etc.
+  - `tls` — needed to read the EKS OIDC certificate thumbprint (a security fingerprint)
+  - `null` — enables `null_resource` which runs shell commands after infrastructure is created (used in `databases.tf`)
+- **`backend "s3"`** — where Terraform saves its memory (called **state**):
+  - The S3 bucket stores `terraform.tfstate` — this maps your Terraform code to real AWS resources. Without it, Terraform doesn't know what it already built.
+  - The DynamoDB table is a lock — prevents two people (or two Jenkins jobs) from running `terraform apply` at the same time, which would cause chaos.
+  - **NEVER delete these.** If the state file is lost, Terraform thinks nothing exists and will try to create duplicates.
+- **`provider "aws"`** — tells Terraform which AWS region to use and adds automatic tags to every single resource created. Every EC2, security group, subnet, etc. automatically gets tagged `Project=FinBank`, `ManagedBy=Terraform`. This makes cost tracking and auditing easy.
+
+---
+
+### File: `variables.tf` — The Settings
+
+Variables are like blank fields in a form. You define what each field is, and fill in the values later via `terraform.tfvars` or environment variables.
+
+```hcl
+variable "db_password" {
+  type      = string
+  sensitive = true    # Never print this in logs or terminal output
+}
+```
+
+Key variables defined:
+
+| Variable | Purpose | Default Value |
+|---|---|---|
+| `aws_region` | Which AWS region | `ap-south-1` (Mumbai) |
+| `environment` | dev / staging / prod | No default — must be provided |
+| `project_name` | Prefix for all resource names | `finbank` |
+| `vpc_cidr` | The network address range | `10.0.0.0/16` |
+| `availability_zones` | Which data centers to use | `ap-south-1a`, `ap-south-1b` |
+| `public_subnet_cidrs` | IP ranges for public subnets | `10.0.1.0/24`, `10.0.2.0/24` |
+| `private_subnet_cidrs` | IP ranges for private subnets | `10.0.3.0/24`, `10.0.4.0/24` |
+| `eks_node_instance_type` | Size of Kubernetes worker VMs | `t3.medium` |
+| `db_instance_class` | Size of MySQL database VM | `db.t3.micro` |
+| `db_password` | MySQL password — **sensitive** | Must be set via env variable |
+| `jwt_secret` | Secret for signing login tokens — **sensitive** | Must be set via env variable |
+| `redis_node_type` | Size of Redis cache VM | `cache.t3.micro` |
+
+**Why `sensitive = true`?** For `db_password` and `jwt_secret`, Terraform will never print the value in terminal output or logs. The values come from environment variables — never from files committed to Git:
+```bash
+export TF_VAR_db_password='yourpassword'
+export TF_VAR_jwt_secret='yoursecret'
+```
+
+---
+
+### File: `environments/dev/terraform.tfvars` — The Actual Values
+
+This is where you fill in the blanks defined in `variables.tf`. Think of `variables.tf` as the form template and `terraform.tfvars` as the filled-in form.
+
+```hcl
+environment  = "dev"
+project_name = "finbank"
+aws_region   = "ap-south-1"
+
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["ap-south-1a", "ap-south-1b"]
+
+eks_node_instance_type = "t3.medium"
+eks_node_min_size      = 1
+eks_node_max_size      = 2
+eks_node_desired_size  = 1
+
+db_instance_class = "db.t3.micro"
+db_name           = "finsecure_db"
+db_username       = "finsecure_user"
+# db_password NOT here — comes from TF_VAR_db_password environment variable
+```
+
+For a staging environment, you would have a different `.tfvars` file with bigger instance sizes and `environment = "staging"`. This is how the same Terraform code deploys to different environments without changing any module code.
+
+---
+
+### File: `main.tf` — The Orchestrator
+
+This is the brain. It calls all 6 modules and wires their outputs together as inputs for dependent modules.
+
+```hcl
+module "vpc"         { source = "./modules/vpc"; ... }
+module "eks"         { source = "./modules/eks";  vpc_id = module.vpc.vpc_id; ... }
+module "rds"         { source = "./modules/rds";  vpc_id = module.vpc.vpc_id; ... }
+module "ecr"         { source = "./modules/ecr";  ... }
+module "elasticache" { source = "./modules/elasticache"; vpc_id = module.vpc.vpc_id; ... }
+module "secretsmanager" {
+  db_host           = module.rds.db_host
+  redis_host        = module.elasticache.redis_endpoint
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  oidc_issuer_url   = module.eks.oidc_issuer_url
+}
+```
+
+Terraform is smart enough to figure out the order automatically based on these dependencies — VPC first, then EKS and RDS in parallel, then Secrets Manager last.
+
+---
+
+### File: `outputs.tf` — The Results
+
+After `terraform apply` finishes, outputs print useful values used by Jenkins and other tools:
+
+```hcl
+output "vpc_id"            { value = module.vpc.vpc_id }
+output "eks_cluster_name"  { value = module.eks.cluster_name }
+output "rds_endpoint"      { value = module.rds.db_endpoint;           sensitive = true }
+output "ecr_backend_url"   { value = module.ecr.backend_repository_url }
+output "redis_endpoint"    { value = module.elasticache.redis_endpoint; sensitive = true }
+output "eso_irsa_role_arn" { value = module.secretsmanager.eso_irsa_role_arn }
+```
+
+`sensitive = true` on `rds_endpoint` and `redis_endpoint` means they will not appear in Jenkins logs. You retrieve them manually with `terraform output redis_endpoint`. Jenkins uses these values to fill in Helm chart `values.yaml` files for each environment.
+
+---
+
+### VPC Architecture
+
+```
+VPC: 10.0.0.0/16  (65,536 private IP addresses)
+├── Public Subnets (ALB lives here — internet-facing)
+│   ├── 10.0.1.0/24 — ap-south-1a
+│   └── 10.0.2.0/24 — ap-south-1b
+│   Tags: kubernetes.io/role/elb=1  (ALB controller discovers these subnets)
+│
+├── Private Subnets (EKS nodes, RDS, Redis — no direct internet access)
+│   ├── 10.0.3.0/24 — ap-south-1a
+│   └── 10.0.4.0/24 — ap-south-1b
+│   Tags: kubernetes.io/role/internal-elb=1
+│
+├── Internet Gateway → attached to VPC, routes public subnet traffic to internet (two-way)
+├── NAT Gateway → in public subnet, allows private subnet resources to reach internet (outbound only)
+│   (so EKS nodes can pull Docker images from ECR, install OS packages, etc.)
+│   (but nobody from the internet can reach private resources — ever)
+└── Route Tables
+    ├── Public RT:  0.0.0.0/0 → Internet Gateway
+    └── Private RT: 0.0.0.0/0 → NAT Gateway
+```
+
+**Why private subnets for EKS nodes and RDS:**
+RDS and EKS worker nodes are not directly reachable from the internet. You cannot SSH into the nodes. You cannot connect to MySQL directly from your laptop. They only communicate with other resources inside the VPC. This is a fundamental security principle for banking applications.
+
+---
+
+### Module 1: VPC — The Network (`modules/vpc/main.tf`)
+
+**What it creates:** The entire private network that all FinBank resources live in.
+
+Think of VPC as a building. Everything inside is isolated from the outside world. Subnets are like different floors. The Internet Gateway is the front door. The NAT Gateway is a one-way door from inside to outside.
+
+**`aws_vpc.main`**
+```hcl
+resource "aws_vpc" "main" {
+  cidr_block           = var.vpc_cidr    # 10.0.0.0/16
+  enable_dns_hostnames = true             # Required for EKS — nodes must resolve DNS names
+  enable_dns_support   = true
+}
+```
+The VPC address range `10.0.0.0/16` means 65,536 possible private IP addresses. `enable_dns_hostnames = true` is required because EKS nodes need to resolve each other's DNS names to communicate.
+
+**`aws_subnet.public` — created twice using `count`**
+```hcl
+resource "aws_subnet" "public" {
+  count             = length(var.public_subnet_cidrs)  # count = 2, creates one subnet per AZ
+  cidr_block        = var.public_subnet_cidrs[count.index]
+  availability_zone = var.availability_zones[count.index]
+  map_public_ip_on_launch = true   # Resources here automatically get a public IP
+
+  tags = {
+    "kubernetes.io/role/elb" = "1"   # CRITICAL — EKS ALB controller finds these subnets
+  }
+}
+```
+- `count = 2` creates one subnet in each Availability Zone (`ap-south-1a` and `ap-south-1b`)
+- `map_public_ip_on_launch = true` means anything launched here gets a public IP automatically
+- The `kubernetes.io/role/elb = 1` tag is **critical** — the AWS Load Balancer Controller reads this tag to discover which subnets to place internet-facing ALBs in
+- **Public subnets hold:** The Application Load Balancer and the NAT Gateway
+
+**`aws_subnet.private` — created twice using `count`**
+```hcl
+resource "aws_subnet" "private" {
+  count             = length(var.private_subnet_cidrs)  # count = 2
+  # No map_public_ip_on_launch — resources here get NO public IPs
+
+  tags = {
+    "kubernetes.io/role/internal-elb" = "1"
+  }
+}
+```
+- No public IPs assigned to anything here
+- **Private subnets hold:** EKS worker nodes, RDS MySQL, ElastiCache Redis
+
+**`aws_internet_gateway.main`**
+```hcl
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id   # Attached to the whole VPC, not individual subnets
+}
+```
+The front door between the VPC and the internet. Public subnets use it for two-way internet access.
+
+**`aws_eip.nat` + `aws_nat_gateway.main`**
+```hcl
+resource "aws_eip" "nat" {
+  domain = "vpc"   # A static public IP address reserved for this NAT
+}
+
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[0].id   # NAT MUST live in a PUBLIC subnet
+}
+```
+The NAT Gateway allows private subnet resources to reach the internet outbound (to pull Docker images, updates etc.) but the internet cannot reach them back. The Elastic IP gives the NAT Gateway a fixed, stable public IP address.
+
+**Route Tables — the GPS routing rules**
+```hcl
+# Public: all external traffic goes through Internet Gateway
+resource "aws_route_table" "public" {
+  route { cidr_block = "0.0.0.0/0"; gateway_id = aws_internet_gateway.main.id }
+}
+
+# Private: all external traffic goes through NAT Gateway
+resource "aws_route_table" "private" {
+  route { cidr_block = "0.0.0.0/0"; nat_gateway_id = aws_nat_gateway.main.id }
+}
+
+# Associations — link each subnet to its route table (required, else subnets have no routing)
+resource "aws_route_table_association" "public" {
+  count          = length(aws_subnet.public)
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "private" {
+  count          = length(aws_subnet.private)
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private.id
+}
+```
+`0.0.0.0/0` means "all traffic going anywhere outside the VPC." Without route table associations, subnets have no idea where to send traffic — they would be completely isolated.
+
+**VPC Outputs:** `vpc_id`, `public_subnet_ids`, `private_subnet_ids`, `nat_gateway_ip`
+
+---
+
+### Module 2: EKS — The Kubernetes Cluster (`modules/eks/main.tf`)
+
+**What it creates:** The entire Kubernetes environment — the control plane (manager) and the worker nodes (EC2 VMs that run your pods).
+
+#### Part A: IAM Roles — Permission Passes
+
+Before creating anything, we set up permissions. Think of IAM roles as ID badges — only the right person/service can pick up the badge and use its permissions.
+
+**Cluster IAM Role:**
+```hcl
+resource "aws_iam_role" "cluster" {
+  name = "finbank-dev-eks-cluster-role"
+  assume_role_policy = {
+    Principal = { Service = "eks.amazonaws.com" }  # Only EKS service can use this role
+    Action    = "sts:AssumeRole"
+  }
+}
+resource "aws_iam_role_policy_attachment" "cluster_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.cluster.name
+}
+```
+The EKS service needs permission to create network interfaces (ENIs) and security groups in your VPC. `AmazonEKSClusterPolicy` is the minimum permission set AWS requires.
+
+**Node Group IAM Role:**
+```hcl
+resource "aws_iam_role" "node_group" {
+  assume_role_policy = {
+    Principal = { Service = "ec2.amazonaws.com" }  # EC2 instances (worker nodes) assume this
+  }
+}
+# 3 required policies for worker nodes:
+resource "aws_iam_role_policy_attachment" "node_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  # Allows nodes to register and connect to the EKS cluster
+}
+resource "aws_iam_role_policy_attachment" "cni_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  # CNI = Container Network Interface
+  # Allows each pod to get its own real IP address from the VPC subnet
+}
+resource "aws_iam_role_policy_attachment" "ecr_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  # Allows nodes to pull Docker images from ECR — read-only, never push
+}
+```
+
+#### Part B: EKS Cluster — The Control Plane
+
+```hcl
+resource "aws_eks_cluster" "main" {
+  name     = "finbank-dev"    # cluster name (project_name + environment)
+  version  = "1.31"           # Kubernetes version
+  role_arn = aws_iam_role.cluster.arn
+
+  vpc_config {
+    subnet_ids              = concat(var.public_subnet_ids, var.private_subnet_ids)
+    # EKS needs ALL subnets — control plane ENIs in private, ALBs in public
+
+    endpoint_private_access = true   # Nodes talk to API server through private network
+    endpoint_public_access  = true   # Your Mac's kubectl can reach the API server
+  }
+
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  # Sends Kubernetes control plane logs to CloudWatch:
+  # api = all API requests, audit = who changed what, authenticator = login events
+}
+```
+
+- `concat(public + private)` — EKS needs to know about all subnets to place control plane components and load balancers in the right ones
+- `endpoint_public_access = true` — needed so you can use `kubectl` from your laptop. In strict production you would set this to `false` and use a VPN
+
+#### Part C: OIDC Provider — The Magic for IRSA
+
+```hcl
+data "tls_certificate" "cluster" {
+  url = aws_eks_cluster.main.identity[0].oidc[0].issuer
+  # Fetches the SHA1 fingerprint of EKS's identity certificate
+}
+
+resource "aws_iam_openid_connect_provider" "cluster" {
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.cluster.certificates[0].sha1_fingerprint]
+  url             = aws_eks_cluster.main.identity[0].oidc[0].issuer
+}
+```
+
+**What is OIDC and IRSA?**
+
+The old problem: if a pod (application) needs to talk to AWS (e.g. read a secret from Secrets Manager), you would need AWS credentials. The bad old way was to hardcode AWS keys in environment variables — terrible security.
+
+**IRSA (IAM Roles for Service Accounts)** solves this completely. The OIDC Provider is the trust bridge between Kubernetes and AWS IAM:
+
+1. EKS generates an OIDC issuer URL — like a digital identity card issuer
+2. AWS IAM trusts that issuer (this resource registers that trust)
+3. A Kubernetes ServiceAccount gets a token from that issuer
+4. When a pod starts, Kubernetes injects that token into the pod
+5. The pod exchanges the token for temporary AWS credentials — without any hardcoded keys
+
+The `tls_certificate` data source fetches the certificate fingerprint so AWS knows the token is genuinely from your EKS cluster.
+
+**IMPORTANT — OIDC ID changes every rebuild:**
+Every time you destroy and recreate EKS, a new OIDC provider URL is generated. Any IAM trust policies that reference the old URL will stop working. After every `terraform apply`, run:
 ```bash
 aws eks describe-cluster --name finbank-dev --region ap-south-1 \
   --query "cluster.identity.oidc.issuer" --output text
 ```
-Then update the IRSA trust policy with the new ID.
 
-### RDS Module — MySQL Configuration
+#### Part D: Node Group — The Worker VMs
 
+```hcl
+resource "aws_eks_node_group" "main" {
+  cluster_name   = aws_eks_cluster.main.name
+  subnet_ids     = var.private_subnet_ids   # Worker nodes in PRIVATE subnets only
+  instance_types = ["t3.medium"]            # 2 vCPU, 4GB RAM per node
+
+  scaling_config {
+    min_size     = 1
+    max_size     = 2
+    desired_size = 1    # dev: start with 1 node
+  }
+
+  update_config {
+    max_unavailable = 1   # During Kubernetes node upgrades, only 1 node offline at a time
+    # Other nodes keep serving traffic — zero-downtime node updates
+  }
+
+  disk_size = 20   # 20GB per node — stores OS, Docker image layers, pod logs
+}
+```
+
+- Worker nodes run in **private subnets** — not reachable from the internet at all
+- The `scaling_config` creates an Auto Scaling Group. If many pods are pending (waiting for capacity), it scales up to `max_size`. If nodes are idle, it scales down to `min_size`. Cost-efficient.
+- `max_unavailable = 1` means during a node version upgrade only 1 node goes offline at a time — the others continue serving traffic
+
+**EKS Outputs:** `cluster_name`, `cluster_endpoint`, `oidc_provider_arn`, `oidc_issuer_url`, `node_role_arn`
+
+---
+
+### Module 3: RDS — MySQL Database (`modules/rds/main.tf`)
+
+**What it creates:** A managed MySQL 8.0 database server that Spring Boot connects to.
+
+#### Security Group — The Firewall
+```hcl
+resource "aws_security_group" "rds" {
+  ingress {
+    from_port   = 3306           # MySQL port
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr] # Allow ONLY from inside VPC (10.0.0.0/16)
+    # Spring Boot pods inside VPC → can connect
+    # Your laptop (outside VPC)  → cannot connect directly
+    # The internet               → cannot connect
+  }
+}
+```
+
+#### DB Subnet Group
+```hcl
+resource "aws_db_subnet_group" "main" {
+  subnet_ids = var.private_subnet_ids   # Private subnets in ap-south-1a + ap-south-1b
+}
+```
+Tells AWS which subnets to place the RDS instance in. Must span 2 Availability Zones even if `multi_az = false` — this enables failover if you ever enable it later.
+
+#### Parameter Group — Custom MySQL Config
+```hcl
+resource "aws_db_parameter_group" "main" {
+  family = "mysql8.0"   # Like MySQL's my.cnf file, but managed by AWS
+
+  parameter { name = "character_set_server"; value = "utf8mb4" }
+  # utf8mb4 = full Unicode including emoji — important for banking notes/comments
+
+  parameter { name = "max_connections"; value = "200" }
+  # Spring Boot HikariCP pool uses ~10 connections per pod
+  # 200 supports many pods running simultaneously
+
+  parameter { name = "slow_query_log"; value = "1" }
+  # Log all slow queries — essential for performance debugging
+
+  parameter { name = "long_query_time"; value = "2" }
+  # Any query taking more than 2 seconds is logged as slow
+}
+```
+
+#### RDS Instance — The MySQL Server
 ```hcl
 resource "aws_db_instance" "main" {
   identifier     = "finbank-dev-mysql"
   engine         = "mysql"
   engine_version = "8.0"
-  instance_class = "db.t3.micro"    # Free tier eligible
+  instance_class = var.db_instance_class    # db.t3.micro for dev (free tier)
 
-  db_name  = var.db_name             # finsecure_db (initial database)
-  username = var.db_username          # finsecure_user
-  password = var.db_password          # from TF_VAR_db_password env var
+  allocated_storage     = 20    # Start with 20GB
+  max_allocated_storage = 100   # Auto-expands up to 100GB when needed — pay only for what you use
+  storage_type          = "gp2" # General Purpose SSD
+  storage_encrypted     = true  # Data encrypted at rest — required for banking (RBI compliance)
 
-  publicly_accessible = false         # NOT reachable from internet
-  multi_az            = false         # Single AZ for dev (set true for prod)
+  db_name  = var.db_name        # finsecure_db — the initial database
+  username = var.db_username    # finsecure_user
+  password = var.db_password    # from sensitive variable — never appears in logs
 
-  backup_retention_period = 7         # 7 days of automated backups
-  storage_encrypted       = true      # Data encrypted at rest
-  deletion_protection     = false     # Can delete for dev
+  publicly_accessible    = false   # No public endpoint created — only reachable from VPC
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+
+  backup_retention_period = 7    # Keep 7 days of automated daily backups
+  backup_window           = "03:00-04:00"        # Runs at 3AM — low traffic time
+  maintenance_window      = "Mon:04:00-Mon:05:00" # OS patches on Monday 4AM
+
+  multi_az            = var.multi_az             # dev: false  | prod: true (standby in different AZ)
+  deletion_protection = var.deletion_protection  # dev: false  | prod: true (prevent accidents)
+  skip_final_snapshot = var.skip_final_snapshot  # dev: true   | prod: false (take backup before destroy)
 
   enabled_cloudwatch_logs_exports = ["error", "slowquery"]
+  # Sends MySQL error log and slow query log to CloudWatch for monitoring
 }
 ```
 
-**Critical:** Terraform creates the MySQL SERVER with one initial database (`finsecure_db`). It does NOT create `finbank_staging_db` or `finbank_prod_db`. Those must be created separately — see `databases.tf` section below.
+**Critical:** Terraform creates the MySQL **server** with one initial database (`finsecure_db`). It does NOT create `finbank_staging_db` or `finbank_prod_db`. Those are created automatically by `databases.tf` — see that section below.
 
-### databases.tf — Auto-Creating Schemas
+**RDS Outputs:** `db_endpoint` (full host:port for Spring Boot JDBC URL), `db_host` (hostname only), `db_port` (3306)
 
-After every terraform destroy + apply, the staging and prod databases are missing. We solved this permanently with a `null_resource`:
+---
+
+### Module 4: ECR — Docker Image Registry (`modules/ecr/main.tf`)
+
+**What it creates:** Three private Docker registries — one each for backend, frontend, and analytics.
+
+Think of ECR like a private DockerHub that lives inside AWS, close to your EKS cluster. Instead of pulling images from the public internet, EKS nodes pull from ECR in the same AWS region — faster, more secure, no rate limits.
+
+#### Three Repositories (same pattern for each)
+```hcl
+resource "aws_ecr_repository" "backend" {
+  name                 = "finbank-backend"
+  image_tag_mutability = "MUTABLE"
+  # MUTABLE = same tag can be overwritten (e.g. latest, 1.0.0-44)
+  # IMMUTABLE = tag is permanent (safer for production, but less flexible)
+
+  image_scanning_configuration {
+    scan_on_push = true
+    # Every image pushed by Jenkins is automatically scanned for CVE vulnerabilities
+    # Results visible in ECR console — free basic scanning included
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+    # Images encrypted at rest using AWS managed keys
+  }
+}
+# Same resource created for "finbank-frontend" and "finbank-analytics"
+```
+
+#### Lifecycle Policies — Automatic Cleanup
+```hcl
+resource "aws_ecr_lifecycle_policy" "backend" {
+  policy = {
+    rules = [
+      {
+        description = "Keep last 10 tagged images"
+        selection   = { tagStatus = "tagged"; countNumber = 10 }
+        action      = { type = "expire" }
+        # Older than the 10 most recent versions → auto-deleted
+        # Saves storage costs — you rarely need to roll back more than 10 versions
+      },
+      {
+        description = "Delete untagged images after 1 day"
+        selection   = { tagStatus = "untagged"; countType = "sinceImagePushed"; countNumber = 1 }
+        action      = { type = "expire" }
+        # Untagged = intermediate Docker build layers pushed accidentally
+        # Deleted after 1 day to prevent storage accumulation
+      }
+    ]
+  }
+}
+# Same lifecycle policy applied to frontend and analytics repositories
+```
+
+**ECR Outputs:** `backend_repository_url`, `frontend_repository_url`, `analytics_repository_url`
+Jenkins pushes to these URLs. EKS nodes pull from these URLs.
+
+---
+
+### Module 5: ElastiCache — Redis Cache (`modules/elasticache/main.tf`)
+
+**What it creates:** A managed Redis cluster for session storage, JWT token blacklisting, and API response caching.
+
+Redis is an in-memory database — extremely fast (microseconds) compared to MySQL (milliseconds). Spring Boot uses Redis for:
+- **Session management** — tracking who is currently logged in
+- **JWT blacklisting** — when a user logs out, their token is stored in Redis so it cannot be reused even if still valid
+- **API response caching** — frequently requested data is cached to reduce database load
+
+#### Security Group
+```hcl
+resource "aws_security_group" "redis" {
+  ingress {
+    from_port   = 6379           # Default Redis port
+    to_port     = 6379
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr] # Only from inside VPC (10.0.0.0/16)
+    # Spring Boot pods inside VPC → can connect
+    # Internet → can NEVER reach Redis
+  }
+}
+```
+
+#### Subnet Group
+```hcl
+resource "aws_elasticache_subnet_group" "main" {
+  subnet_ids = var.private_subnet_ids   # Private subnets — same as RDS
+}
+```
+Redis lives in private subnets — completely isolated from the internet.
+
+#### Redis Cluster
+```hcl
+resource "aws_elasticache_cluster" "main" {
+  cluster_id     = "finbank-dev-redis"
+  engine         = "redis"
+  engine_version = "7.0"        # Latest stable Redis — supports all Spring Data Redis features
+
+  node_type       = var.redis_node_type       # cache.t3.micro = 0.5GB RAM (free tier eligible)
+  num_cache_nodes = var.redis_num_cache_nodes # 1 node for dev, 2+ for prod (replication + failover)
+  port            = 6379
+
+  subnet_group_name    = aws_elasticache_subnet_group.main.name
+  security_group_ids   = [aws_security_group.redis.id]
+  parameter_group_name = "default.redis7"   # AWS default settings for Redis 7
+
+  apply_immediately = true
+  # dev: apply config changes immediately
+  # prod: set to false — only apply during maintenance window (Sunday 2AM) to avoid disruption
+}
+```
+
+**ElastiCache Outputs:** `redis_endpoint` (hostname for Spring Boot), `redis_port` (always 6379)
+These values flow into Secrets Manager and into `values.yaml` as `SPRING_DATA_REDIS_HOST`.
+
+---
+
+### Module 6: Secrets Manager — The Secure Vault (`modules/secretsmanager/main.tf`)
+
+**What it creates:** Encrypted storage for all application secrets, plus the IAM plumbing that allows the External Secrets Operator (ESO) to read them automatically and inject them into pods as environment variables.
+
+**The problem this solves:** Pods need DB passwords and JWT secrets. But you cannot hardcode them in code or Kubernetes YAML (visible to anyone with Git access). Secrets Manager is AWS's encrypted vault. ESO reads from the vault and creates Kubernetes Secrets automatically — your Spring Boot pods receive credentials as environment variables without ever touching the vault directly.
+
+#### Three Secrets Created Using `for_each`
+```hcl
+resource "aws_secretsmanager_secret" "app_secrets" {
+  for_each = { "dev" = "finsecure_db", "staging" = "finbank_staging_db", "prod" = "finbank_prod_db" }
+  # for_each is like a loop — creates one secret per map entry
+  # Result: finbank/dev/app-secrets, finbank/staging/app-secrets, finbank/prod/app-secrets
+
+  name                    = "${var.project_name}/${each.key}/app-secrets"
+  recovery_window_in_days = 0   # dev: delete immediately (no 30-day recovery window)
+}
+```
+
+#### Secret Values — Filled with Real Connection Details
+```hcl
+resource "aws_secretsmanager_secret_version" "app_secrets" {
+  for_each  = var.env_db_name_config
+  secret_id = aws_secretsmanager_secret.app_secrets[each.key].id
+
+  secret_string = jsonencode({
+    db_host     = var.db_host     # Real RDS hostname from RDS module output
+    db_name     = each.value      # dev=finsecure_db, staging=finbank_staging_db, prod=finbank_prod_db
+    db_username = var.db_username
+    db_password = var.db_password
+    jwt_secret  = var.jwt_secret
+    redis_host  = var.redis_host  # Real Redis hostname from ElastiCache module output
+    redis_port  = var.redis_port
+  })
+  # Every terraform apply after RDS/Redis are created → secrets automatically contain correct values
+}
+```
+
+#### IAM Policy — Controls Who Can Read the Secrets
+```hcl
+resource "aws_iam_policy" "secrets_reader" {
+  policy = {
+    Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    Resource = "arn:aws:secretsmanager:ap-south-1:860616633001:secret:finbank/*/app-secrets-*"
+    # * is a wildcard — allows reading dev, staging, and prod secrets
+    # Only things that assume the IRSA role (below) can use this policy
+  }
+}
+```
+
+#### IRSA Role — The Trust Bridge for ESO
+```hcl
+locals {
+  oidc_issuer = replace(var.oidc_issuer_url, "https://", "")
+  # Strip https:// — AWS trust policy format requires URL without the protocol prefix
+}
+
+resource "aws_iam_role" "eso_irsa" {
+  name = "finbank-eso-irsa-role"
+
+  assume_role_policy = {
+    Principal = { Federated = var.oidc_provider_arn }  # The EKS OIDC provider
+    Action    = "sts:AssumeRoleWithWebIdentity"
+    Condition = {
+      "${oidc_issuer}:aud" = "sts.amazonaws.com"
+      "${oidc_issuer}:sub" = "system:serviceaccount:external-secrets:external-secrets"
+      # ONLY this exact Kubernetes ServiceAccount in the external-secrets namespace can assume this role
+      # Not just any pod — specifically the ESO ServiceAccount
+    }
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "eso_secrets_access" {
+  policy_arn = aws_iam_policy.secrets_reader.arn
+  role       = aws_iam_role.eso_irsa.name
+  # Attach the read-secrets permission to the IRSA role
+}
+```
+
+**How the full secrets flow works end to end:**
+1. ESO is installed in the `external-secrets` namespace with a ServiceAccount named `external-secrets`
+2. That ServiceAccount is annotated with the IRSA role ARN
+3. When the ESO pod starts, Kubernetes injects a web identity token into it
+4. ESO uses the token to call AWS STS (Security Token Service)
+5. AWS checks: "Is this token from our OIDC provider? Is it the correct ServiceAccount?" → Yes
+6. AWS gives ESO temporary credentials to read secrets
+7. ESO reads the secret from Secrets Manager and creates a Kubernetes Secret object
+8. Spring Boot pod reads the Kubernetes Secret as environment variables — never directly touches Secrets Manager
+
+**Secrets Manager Outputs:** `secrets_arns` (paths used by ESO's SecretStore), `eso_irsa_role_arn` (annotated onto ESO's ServiceAccount)
+
+---
+
+### File: `databases.tf` — Auto-Creating MySQL Schemas
+
+**The problem:** Terraform creates the MySQL server (RDS) with one initial database (`finsecure_db`). But the app needs 3 databases: `finsecure_db`, `finbank_staging_db`, and `finbank_prod_db`. There is no AWS resource in Terraform to create MySQL databases *inside* a server. And RDS is in a private subnet — your laptop cannot connect to it directly.
+
+**The solution:** A `null_resource` with a `local-exec` provisioner runs a shell script on the Jenkins machine (which has `kubectl` and `aws` CLI). The script launches a temporary MySQL pod inside EKS (which is inside the VPC and can reach private RDS), creates all three databases, then destroys itself.
 
 ```hcl
 resource "null_resource" "create_databases" {
+
   triggers = {
-    rds_host = module.rds.db_host  # Re-runs when RDS changes
+    rds_host = module.rds.db_host
+    # Re-runs whenever the RDS hostname changes — i.e., after every destroy+apply cycle
+    # null_resource normally runs only once; triggers force it to re-run when values change
   }
+
   depends_on = [module.rds, module.eks]
+  # Wait for RDS AND EKS to both exist before running this script
 
   provisioner "local-exec" {
     command = <<-EOF
-      sleep 90  # Wait for RDS to be ready to accept connections
-      aws eks update-kubeconfig --region ap-south-1 --name finbank-dev
-      kubectl run db-init --image=mysql:8.0 --restart=Never -n default -- sleep 120
-      kubectl wait pod/db-init --for=condition=Ready --timeout=120s -n default
-      kubectl exec db-init -n default -- mysql -h ${HOST} -u ${USER} -p${PASS} \
-        -e 'CREATE DATABASE IF NOT EXISTS finbank_staging_db ...'
-      kubectl exec db-init -n default -- mysql -h ${HOST} -u ${USER} -p${PASS} \
-        -e 'CREATE DATABASE IF NOT EXISTS finbank_prod_db ...'
-      kubectl delete pod db-init -n default
+      set -e  # Stop script immediately if any command fails
+
+      echo "Step 1: Waiting 90s for RDS to accept connections..."
+      sleep 90
+      # RDS reports 'available' to AWS before MySQL is actually ready to accept connections
+      # 90 seconds is a safe buffer to avoid "Connection refused" errors
+
+      echo "Step 2: Configure kubectl to talk to EKS cluster..."
+      aws eks update-kubeconfig --region ${var.aws_region} --name ${var.project_name}-${var.environment}
+
+      echo "Step 3: Clean up any leftover db-init pod from a previous failed run..."
+      kubectl delete pod db-init --namespace=default --ignore-not-found=true
+
+      echo "Step 4: Launch a temporary MySQL client pod inside EKS..."
+      kubectl run db-init --image=mysql:8.0 --restart=Never --namespace=default -- sleep 300
+      # This pod is inside EKS → inside VPC → can reach private RDS subnet
+      # sleep 300 keeps it alive for 5 minutes while we run commands
+
+      echo "Step 5: Wait until the pod is fully running..."
+      kubectl wait pod/db-init --for=condition=Ready --timeout=120s --namespace=default
+
+      echo "Step 6: Create finsecure_db (dev environment database)..."
+      kubectl exec db-init --namespace=default -- mysql \
+        -h ${module.rds.db_host} -u ${var.db_username} -p${var.db_password} \
+        -e "CREATE DATABASE IF NOT EXISTS finsecure_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+      echo "Step 7: Create finbank_staging_db (staging environment database)..."
+      kubectl exec db-init --namespace=default -- mysql \
+        -h ${module.rds.db_host} -u ${var.db_username} -p${var.db_password} \
+        -e "CREATE DATABASE IF NOT EXISTS finbank_staging_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+      echo "Step 8: Create finbank_prod_db (production environment database)..."
+      kubectl exec db-init --namespace=default -- mysql \
+        -h ${module.rds.db_host} -u ${var.db_username} -p${var.db_password} \
+        -e "CREATE DATABASE IF NOT EXISTS finbank_prod_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+      echo "Step 9: Verify all databases exist..."
+      kubectl exec db-init --namespace=default -- mysql \
+        -h ${module.rds.db_host} -u ${var.db_username} -p${var.db_password} \
+        -e "SHOW DATABASES;"
+
+      echo "Step 10: Delete the temporary pod — clean, no leftovers..."
+      kubectl delete pod db-init --namespace=default --ignore-not-found=true
     EOF
   }
 }
 ```
 
-This launches a temporary MySQL client pod **inside EKS** (which can reach the private RDS subnet), creates all required databases, then self-destructs. Zero manual steps.
+**Why `CREATE DATABASE IF NOT EXISTS`?** Safe to re-run — if the database already exists it simply does nothing. No errors, no data loss.
+
+This launches a temporary MySQL client pod **inside EKS** (which can reach the private RDS subnet), creates all required databases, then self-destructs. Zero manual steps after every rebuild.
+
+---
 
 ### Terraform State — Never Lose This
 
@@ -847,10 +1524,59 @@ S3 Bucket: finbank-terraform-state-<YOUR_AWS_ACCOUNT_ID>
   └── finbank/dev/terraform.tfstate    ← maps your code to real AWS resources
 
 DynamoDB Table: finbank-terraform-locks
-  └── prevents two people running terraform simultaneously
+  └── prevents two people running terraform apply simultaneously
 ```
 
-**NEVER destroy these bootstrap resources.** If the state file is lost, Terraform loses track of all existing AWS resources and would try to create duplicates, causing conflicts.
+**NEVER destroy these bootstrap resources.** If the state file is lost, Terraform loses track of all existing AWS resources and would try to create duplicates on the next apply, causing name conflicts and failures.
+
+---
+
+### How Everything Connects — The Full Picture
+
+```
+terraform apply
+      │
+      ├─► VPC Module (runs first — everything depends on it)
+      │     Creates: VPC, 2 public subnets, 2 private subnets,
+      │              Internet Gateway, NAT Gateway, Route Tables
+      │     Outputs: vpc_id, public_subnet_ids, private_subnet_ids
+      │
+      ├─► EKS Module (uses vpc_id + subnet_ids from VPC)
+      │     Creates: Cluster IAM role, Node IAM role, EKS cluster,
+      │              OIDC provider, Node group (EC2 workers)
+      │     Outputs: cluster_name, oidc_provider_arn, oidc_issuer_url
+      │
+      ├─► RDS Module (uses vpc_id + private_subnet_ids from VPC)
+      │     Creates: Security group (port 3306 from VPC only),
+      │              Subnet group, Parameter group, MySQL 8.0 instance
+      │     Outputs: db_host, db_endpoint, db_port
+      │
+      ├─► ECR Module (no VPC dependency — global registry)
+      │     Creates: 3 repositories (backend, frontend, analytics)
+      │              + lifecycle policies for automatic image cleanup
+      │     Outputs: backend/frontend/analytics repository URLs
+      │
+      ├─► ElastiCache Module (uses vpc_id + private_subnet_ids from VPC)
+      │     Creates: Security group (port 6379 from VPC only),
+      │              Subnet group, Redis 7.0 cluster
+      │     Outputs: redis_endpoint, redis_port
+      │
+      ├─► Secrets Manager Module
+      │     (uses db_host from RDS, redis_endpoint from ElastiCache,
+      │      oidc_provider_arn + oidc_issuer_url from EKS)
+      │     Creates: 3 secrets (dev/staging/prod) with real connection details,
+      │              IAM policy (read secrets), IRSA role (for ESO)
+      │     Outputs: secrets_arns, eso_irsa_role_arn
+      │
+      └─► databases.tf null_resource (depends on RDS + EKS both being ready)
+            Runs shell script via local-exec:
+            → kubectl → temporary mysql:8.0 pod inside EKS
+            → Creates finsecure_db, finbank_staging_db, finbank_prod_db
+            → Deletes the temporary pod
+            Zero manual steps after every rebuild
+```
+
+---
 
 ### Passing Variables — Always Use TF_VAR_
 
@@ -869,6 +1595,29 @@ export TF_VAR_db_password='<YOUR_DB_PASSWORD>'
 export TF_VAR_jwt_secret='<YOUR_JWT_SECRET>'
 terraform apply -var-file=environments/dev/terraform.tfvars -auto-approve
 ```
+
+---
+
+### Key Concepts Quick Reference
+
+| Concept | What It Means in Simple English |
+|---|---|
+| **IaC** | Infrastructure as Code — build AWS resources from code files instead of clicking buttons |
+| **Module** | A reusable group of related resources (like a function in programming) |
+| **Variable** | A blank field — defined in `variables.tf`, filled in `terraform.tfvars` or env vars |
+| **Output** | A value a module exposes so other modules or scripts can use it |
+| **State file** | Terraform's memory — maps code to real AWS resources. Stored in S3. Never lose this. |
+| **VPC** | Your private network on AWS — isolated from the internet |
+| **Public subnet** | Resources here get public IPs — ALB (load balancer) lives here |
+| **Private subnet** | Resources here have no public IPs — EKS nodes, RDS, Redis live here |
+| **Internet Gateway** | The VPC's front door to/from the internet (two-way) |
+| **NAT Gateway** | One-way door — private resources can call out, nothing can call in |
+| **Security Group** | Firewall rules — which ports and IPs are allowed to connect |
+| **IAM Role** | A permission pass for AWS services and EC2 instances |
+| **OIDC + IRSA** | Lets Kubernetes pods assume IAM roles without any hardcoded AWS credentials |
+| **null_resource** | A Terraform trick to run arbitrary shell scripts as part of `terraform apply` |
+| **for_each** | A loop in Terraform — creates multiple resources from a map (e.g. 3 secrets at once) |
+| **sensitive** | Marks a variable/output as secret — never appears in terminal output or CI/CD logs |
 
 ---
 
