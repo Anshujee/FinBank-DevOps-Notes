@@ -12,6 +12,7 @@
 3. [Terraform drift, state locking, and concurrent pipeline conflicts](#q3-terraform-drift-state-locking-and-concurrent-execution)
 4. [Production AKS incident — CrashLoopBackOff after deployment](#q4-production-troubleshooting--crashloopbackoff-on-aks)
 5. [Pods are healthy but users cannot access the application — traffic flow and troubleshooting](#q5-pods-healthy-but-users-cannot-access--traffic-flow-and-layer-by-layer-troubleshooting)
+6. [Moving the Terraform state file to a new Blob Storage — what happens on next apply](#q6-moving-terraform-state-file-to-a-new-blob-storage)
 
 ---
 
@@ -639,6 +640,38 @@ If we are using Azure Application Gateway as the Ingress, I would also check the
 
 ---
 
+## Q6. Moving Terraform State File to a New Blob Storage
+
+**Interviewer's Question (asked live, TCS interview — 2026-08-01):**
+
+> We have an Azure Blob where we store the Terraform state file. Now we create a new Blob Storage and move our state file to that new storage. After that, if we run `terraform apply`, what will happen?
+
+### Explanation
+
+Terraform doesn't locate its state file by searching — it only knows where to look because of the `backend "azurerm" {}` block defined in the `.tf` configuration (`storage_account_name`, `container_name`, `key`). Manually moving the actual `.tfstate` blob to a new storage account does **not** update this backend configuration.
+
+So when `terraform apply` is run after the move:
+
+- Terraform still reads the backend block, which still points to the **old** storage account/container.
+- Since the state file no longer exists there, Terraform sees **no state** at that location — it behaves as though nothing has been deployed yet.
+- `terraform apply` will then try to **create all resources again from scratch**, because as far as Terraform's state is concerned, nothing exists.
+- In reality the resources already exist in Azure, so this typically fails with errors like `"A resource with the ID ... already exists"`, or in the worst case creates duplicate/conflicting resources.
+- This is a classic way people accidentally cause **state drift / resource conflicts** in production — moving the file without telling Terraform about the new location.
+
+**Correct way to move Terraform state to a new backend:**
+
+1. Update the `backend "azurerm" {}` block in the Terraform code to point to the **new** storage account, container, and key.
+2. Run:
+   ```bash
+   terraform init -migrate-state
+   ```
+   This detects that the backend config changed, finds the old state, prompts for confirmation, and **copies** the existing state safely into the new backend location.
+3. Verify with `terraform plan` — it should show **"No changes"** if the migration was done correctly, meaning Terraform now sees the same real-world resources as before, just tracked from the new backend.
+
+**Key takeaway:** Never manually move/copy a `.tfstate` blob and expect Terraform to "just find it." Always update the backend config and let Terraform (`init -migrate-state`) handle the migration — this preserves state locking, versioning, and consistency.
+
+---
+
 ## Quick Revision Summary
 
 | Question | Core Points to Remember |
@@ -648,6 +681,7 @@ If we are using Azure Application Gateway as the Ingress, I would also check the
 | Drift + State Locking | `plan -refresh-only` for drift check → Activity Log → update code or restore → blob lease locking → force-unlock with caution |
 | CrashLoopBackOff | `describe pod` → `logs --previous` → exit codes → rollback first → then RCA |
 | Pods healthy, users can't access | Full traffic path: DNS → Azure edge → Ingress Controller → Service → Pod → troubleshoot outside-in → check Endpoints first |
+| Move state to new Blob Storage | Backend config, not file location, controls where Terraform looks → update backend block → `terraform init -migrate-state` → verify with `plan` shows "No changes" |
 
 ---
 
