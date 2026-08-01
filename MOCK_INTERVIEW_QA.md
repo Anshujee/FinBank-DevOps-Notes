@@ -13,6 +13,7 @@
 4. [Production AKS incident — CrashLoopBackOff after deployment](#q4-production-troubleshooting--crashloopbackoff-on-aks)
 5. [Pods are healthy but users cannot access the application — traffic flow and troubleshooting](#q5-pods-healthy-but-users-cannot-access--traffic-flow-and-layer-by-layer-troubleshooting)
 6. [Moving the Terraform state file to a new Blob Storage — what happens on next apply](#q6-moving-terraform-state-file-to-a-new-blob-storage)
+7. [Explain the concept of the Terraform `lifecycle` block](#q7-explain-the-concept-of-the-terraform-lifecycle-block)
 
 ---
 
@@ -672,6 +673,85 @@ So when `terraform apply` is run after the move:
 
 ---
 
+## Q7. Explain the Concept of the Terraform `lifecycle` Block
+
+**Interviewer's Question:**
+
+> Can you explain what the `lifecycle` block does in Terraform? What arguments does it support and when would you use each one?
+
+### Your Answer (Polished)
+
+The `lifecycle` block is a meta-argument you place inside a resource block to override Terraform's default behaviour for how that specific resource is created, updated, or destroyed.
+
+A simple way to think about it: normally, if a change forces replacement — for example, changing a VM's image — Terraform's default approach is to destroy the old resource first and then create the new one. If that resource is serving live traffic, this causes a brief outage. The `lifecycle` block lets me control exactly how that resource behaves instead of relying on Terraform's default.
+
+It has four arguments I use:
+
+**1. `create_before_destroy`** — for zero-downtime replacement:
+```hcl
+resource "azurerm_linux_virtual_machine" "vm" {
+  name = "payment-api-vm"
+  # ...
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+```
+Instead of destroy-then-create, Terraform creates the new resource first, waits for it to come up, and only then destroys the old one. I use this for resources behind a load balancer where downtime is not acceptable.
+
+**2. `prevent_destroy`** — to protect critical resources:
+```hcl
+resource "azurerm_mssql_database" "prod_db" {
+  name = "finbank-prod-db"
+  # ...
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+Any plan or apply that would delete this resource fails immediately instead of proceeding. I use this on production databases or anything storing critical state, so it can't be deleted accidentally by a code change or a stray `terraform destroy`.
+
+**3. `ignore_changes`** — to tolerate expected drift:
+```hcl
+resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
+  name      = "app-vmss"
+  instances = 3
+  # ...
+  lifecycle {
+    ignore_changes = [instances, tags]
+  }
+}
+```
+If something outside Terraform legitimately changes an attribute — for example, an autoscaler adjusting instance count, or someone adding a tracking tag in the Azure Portal — I don't want Terraform to "fix" it back on the next apply. `ignore_changes` tells Terraform to stop tracking drift on those specific attributes, while everything else is still managed normally.
+
+**4. `replace_triggered_by`** — to force replacement based on an external dependency:
+```hcl
+resource "azurerm_linux_virtual_machine" "vm" {
+  name = "payment-api-vm"
+  # ...
+  lifecycle {
+    replace_triggered_by = [
+      azurerm_key_vault_secret.db_password.version
+    ]
+  }
+}
+```
+This forces Terraform to destroy and recreate the resource whenever a referenced value changes — even if nothing in the resource's own configuration changed. I use this when a VM needs to be rebuilt whenever a secret it depends on is rotated, since an in-place update wouldn't properly pick up the new secret.
+
+**In practice:** for a production VM behind a load balancer that reads a Key Vault secret, I would combine all four — `create_before_destroy` for safe replacement, `prevent_destroy` so it can't be deleted by mistake, `ignore_changes` on tags that get modified outside Terraform, and `replace_triggered_by` so it rebuilds automatically when the secret rotates.
+
+---
+
+### What Makes This Answer Strong
+
+- Opens with a simple mental model (default destroy-then-create vs overriding it) before jumping into syntax
+- Explains **why** each argument exists, not just what it does — ties each one to a real production scenario
+- Uses a consistent example (VM + Key Vault secret) across arguments, making it easy to follow and remember
+- Closes by combining all four in one realistic resource — shows these aren't used in isolation
+- Doesn't confuse this with the general Terraform workflow (`init/plan/apply/destroy`) — a common mix-up interviewers listen for
+
+---
+
 ## Quick Revision Summary
 
 | Question | Core Points to Remember |
@@ -682,6 +762,7 @@ So when `terraform apply` is run after the move:
 | CrashLoopBackOff | `describe pod` → `logs --previous` → exit codes → rollback first → then RCA |
 | Pods healthy, users can't access | Full traffic path: DNS → Azure edge → Ingress Controller → Service → Pod → troubleshoot outside-in → check Endpoints first |
 | Move state to new Blob Storage | Backend config, not file location, controls where Terraform looks → update backend block → `terraform init -migrate-state` → verify with `plan` shows "No changes" |
+| `lifecycle` block | `create_before_destroy` (zero downtime) → `prevent_destroy` (safety guard) → `ignore_changes` (tolerate drift) → `replace_triggered_by` (rebuild on dependency change) |
 
 ---
 
